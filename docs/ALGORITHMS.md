@@ -56,3 +56,61 @@
 ## ۸. ماژول‌های آینده
 
 ML/Deep Learning در MVP-1 خارج از دامنه است. مسیر مدل: label دقیق (Triple Barrier)، Purging/Embargo، Nested Walk-forward، کالیبراسیون (Brier/LogLoss/ECE)، Model Registry و Drift — بدون ورود به مسیر تصمیم تا عبور از Gate.
+
+## . ریم بازار (P3-4)
+
+ماول `fxars/research/regime.py` هر کندل را به یکی از پنج ریم نسبت میدهد:
+
+| ریم | تعریف | اولویت |
+|---|---|---|
+| `LOW_VOL` | ATR percentile   (فشردگی نوسان) |  (بالاترین) |
+| `TRENDING_UP` | `(ema_fast - ema_slow) / atr > 0.05` و ATR percentile بین  و  |  |
+| `TRENDING_DOWN` | `(ema_fast - ema_slow) / atr < -0.05` و ATR percentile بین  و  |  |
+| `HIGH_VOL` | ATR percentile   و روند واضح نیست |  |
+| `RANGING` | پیشفرض |  (پایینترین) |
+
+**پارامترها** (`RegimeConfig`):
+- `ema_fast=20`, `ema_slow=50`
+- `atr_period=14`, `vol_lookback=100`
+- `vol_high_percentile=80.0`, `vol_low_percentile=20.0`
+- `trend_slope_threshold=0.05`
+
+**نکات پیادهسازی:**
+- `atr_percentile` با **midpoint rank** محاسبه میشود تا سری ثابت ~ بدهد (نه ).
+- ریم نوسان وقتی غالب میشود که ATR percentile در صدکهای حدی باشد **و** روند واضح نباشد.
+- ریم روند وقتی غالب میشود که `slope_norm` از آستانه عبور کند (اولویت بالاتر از HIGH_VOL).
+
+### فیلتر ریم در بکتست (P3-4-ext2)
+
+`BacktestConfig.allowed_regimes: tuple[str, ...]` (پیشفرض `()` = همه مجاز).
+اگر پر باشد فقط سیگنالهایی معامله میشوند که کندل جاریشان در ریمهای مجاز باشد.
+
+**نتیجه تجربی روی EURUSD/H1 (دمو):**
+
+| متریک | Baseline | Filtered (TRENDING_UP+DOWN) | تغییر |
+|---|---|---|---|
+| تعداد معاملات |  |  | . |
+| سود خالص | +. | +. | **+** |
+| Sharpe | . | . | **+** |
+| Calmar | . | . | + |
+| DSR | . | . | + |
+| سیگنالهای ردشده |  |  |  |
+
+### پیکربندی
+
+از طریق `config/settings.json`:
+```json
+{"backtest": {"allowed_regimes": ["TRENDING_UP", "TRENDING_DOWN"]}}
+```
+
+از طریق CLI:
+```powershell
+python -m fxars backtest --instrument EURUSD --timeframe H1 --overrides "{\"allowed_regimes\": [\"TRENDING_UP\"]}"
+```
+
+از طریق API (`POST /api/v1/backtests`):
+```json
+{"instrument_id": "EURUSD", "timeframe": "H1", "overrides": {"allowed_regimes": ["TRENDING_UP"]}}
+```
+
+`allowed_regimes` بخشی از `config_hash` است پس هر تغییر آن خروجیهای بکتست را از نظر بازتولیدپذیری تغییر میدهد.

@@ -27,3 +27,36 @@
 3. استراتژی‌های اولویت‌دار و پارامترهای نهایی آن‌ها پس از Benchmark.
 4. دوره OOS و حداقل نمونه آماری.
 5. محیط استقرار (Windows/VPS) و سیاست نگهداری داده.
+
+## تصمیمهای P3 (Research Deepening)
+
+### P3-1: Triple Barrier Labeling
+- **انتخاب:** `profit_atr=1.5`, `stop_atr=1.0`, `max_holding_bars=24` بهعنوان پیشفرض.
+- **دلیل:** استاندارد López de Prado (AFML ch. 3). ورودی به ML و همخوان با RR targets فعلی سناریو.
+- **محدودیت:** استفاده از `close` کندل ورود در عمل entry در `open` کندل بعد است. برای ML دقیق باید `entry_price` از `_enter` بگیرد.
+
+### P3-2: Purged K-Fold
+- **انتخاب:** `n_splits=5`, `purge_bars=10`, `embargo_bars=10`.
+- **دلیل:** purge forward و backward (هر دو) برای جلوگیری از نشت برچسب و اتوکورلیشن.
+- **محدودیت:** embargo از `bar` استفاده میکند نه زمان تقویمی. برای تعطیلات باید `bar` شمارش معاملاتی باشد.
+
+### P3-3: Calibration
+- **انتخاب:** `evidence_strength` بهعنوان proxy برای احتمال `TemperatureScaling` با grid search.
+- **دلیل:** تنها سیگنال پیوسته موجود در MVP-1 است. `TemperatureScaling` ranking-preserving و یکپارامتری است.
+- **محدودیت:** `evidence_strength` احتمال آماری نیست. برای کالیبراسیون دقیق باید `logit` خام سیگنال (قبل از تجمیع خانوادهها) را کالیبره کنیم. این کار در فاز ML با Logistic/Isotonic Regression انجام خواهد شد.
+- **معیار AC-09:** ECE < 0.10 برای نمایش احتمال. مقدار فعلی روی دمو: نیازمند بازبینی.
+
+### P3-4: Regime Detection
+- **انتخاب:**  ریم با اولویت `LOW_VOL > TRENDING > HIGH_VOL > RANGING`.
+- **دلیل:** روند قوی در نوسان بالا **هنوز روند است** HIGH_VOL فقط وقتی که روند واضح نباشد معنا دارد.
+- **محدودیت:** `_atr_percentile_series` با midpoint rank برای سریهای بسیار کوتاه (<  کندل) محافظهکارانه است.
+
+### P3-4-ext2: Regime Filter in Backtest
+- **انتخاب:** `allowed_regimes=()` بهعنوان پیشفرض (همه مجاز). فعالسازی صریح از config/API/CLI.
+- **دلیل:** تغییر پیشفرض همه بکتستهای موجود را میشکند. فعالسازی صریح ایمنتر است.
+- **نتیجه تجربی:** + سود خالص روی دمو با فیلتر `TRENDING_UP+DOWN`.
+- **محدودیت:** regime detection بر مبنای گذشته است (causal) برای forward test همان رفتار انتظار میرود.
+
+### P3-4-ext3: Config Integration
+- **انتخاب:** `BacktestSettings.allowed_regimes` بخشی از `config_hash` است.
+- **دلیل:** تغییر فیلتر خروجی بکتست را تغییر میدهد و باید در بازتولیدپذیری لحاظ شود.
