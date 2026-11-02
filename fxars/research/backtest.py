@@ -50,21 +50,34 @@ class BacktestConfig:
     #   "scenario" = منطق دقیقاً هم‌خوان با ScenarioBuilder/TriggerEvaluator
     #   "baseline" = منطق ساده قبلی (stop از کف/سقف ۲۰ کندل + ورود در open)
     mode: str = "scenario"
+    # P3-4-ext2: optional regime filter; empty tuple = allow all
+    allowed_regimes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        for name in ("initial_equity", "risk_per_trade", "spread_pips", "slippage_pips",
-                     "commission_per_lot", "swap_per_lot_per_night", "stop_buffer_pips", "partial_close_fraction"):
+        for name in (
+            "initial_equity", "risk_per_trade", "spread_pips", "slippage_pips",
+            "commission_per_lot", "swap_per_lot_per_night", "stop_buffer_pips",
+            "partial_close_fraction",
+        ):
             object.__setattr__(self, name, _d(getattr(self, name)))
         object.__setattr__(self, "target_r_multiples", tuple(_d(item) for item in self.target_r_multiples))
         object.__setattr__(self, "quote_rates", {key: _d(value) for key, value in self.quote_rates.items()})
+        # P3-4-ext2: normalize allowed_regimes to tuple
+        if not isinstance(self.allowed_regimes, tuple):
+            object.__setattr__(self, "allowed_regimes", tuple(self.allowed_regimes))
         if self.mode not in ("scenario", "baseline"):
             raise ValueError(f"mode نامعتبر: {self.mode!r} (allowed: scenario, baseline)")
         if self.initial_equity <= 0 or not (0 < self.risk_per_trade <= Decimal("0.05")):
             raise ValueError("پارامترهای سرمایه/ریسک بک‌تست نامعتبرند.")
 
     @classmethod
-    def from_settings(cls, settings: BacktestSettings, *, overrides: dict[str, Any] | None = None,
-                      min_signal_strength: float = 0.30) -> "BacktestConfig":
+    def from_settings(
+        cls,
+        settings: BacktestSettings,
+        *,
+        overrides: dict[str, Any] | None = None,
+        min_signal_strength: float = 0.30,
+    ) -> "BacktestConfig":
         base = cls(
             initial_equity=settings.initial_equity,
             risk_per_trade=settings.risk_per_trade,
@@ -87,6 +100,9 @@ class BacktestConfig:
             for key, value in overrides.items():
                 if key not in values:
                     raise ValueError(f"پارامتر ناشناخته بک‌تست: {key}")
+                # P3-4-ext2: accept list for allowed_regimes
+                if key == "allowed_regimes" and isinstance(value, list):
+                    value = tuple(value)
                 values[key] = value
             return cls(**values)
         return base
@@ -152,8 +168,15 @@ class BacktestOutput:
 
 
 class BacktestEngine:
-    def __init__(self, instrument: Instrument, timeframe: str, config: BacktestConfig, analysis: AnalysisSettings,
-                 *, calendar=None) -> None:
+    def __init__(
+        self,
+        instrument: Instrument,
+        timeframe: str,
+        config: BacktestConfig,
+        analysis: AnalysisSettings,
+        *,
+        calendar=None,
+    ) -> None:
         self.instrument = instrument
         self.timeframe = timeframe
         self.config = config
@@ -182,20 +205,46 @@ class BacktestEngine:
     ) -> BacktestOutput:
         candles = list(candles)
         if end_index - start_index < 2:
-            return BacktestOutput([], [], compute_metrics([], [], initial_equity=float(self.config.initial_equity),
-                                                          timeframe=self.timeframe), {"bars": 0})
+            return BacktestOutput(
+                [], [],
+                compute_metrics(
+                    [], [],
+                    initial_equity=float(self.config.initial_equity),
+                    timeframe=self.timeframe,
+                ),
+                {"bars": 0},
+            )
+
+        # P3-4-ext2: precompute regime labels once if filter active
+        regime_labels: dict[datetime, str] | None = None
+        if self.config.allowed_regimes:
+            try:
+                from fxars.research.regime import classify_regimes
+
+                labels = classify_regimes(candles)
+                regime_labels = {c.open_time: lb.regime for c, lb in zip(candles, labels)}
+            except Exception:
+                regime_labels = None
+
         equity = initial_equity if initial_equity is not None else self.config.initial_equity
-        equity_curve: list[tuple[str, float]] = [(format_ts(candles[start_index].open_time), float(equity))]
+        equity_curve: list[tuple[str, float]] = [
+            (format_ts(candles[start_index].open_time), float(equity))
+        ]
         trades: list[dict[str, Any]] = []
         position: _OpenTrade | None = None
         pending: dict[str, Any] | None = None
-        stats = {"bars": 0, "decisions": 0, "entries": 0, "skipped": 0, "no_trade": 0,
-                 "stops": 0, "targets": 0, "pending_expired": 0, "pending_invalidated": 0}
+        stats = {
+            "bars": 0, "decisions": 0, "entries": 0, "skipped": 0, "no_trade": 0,
+            "stops": 0, "targets": 0, "pending_expired": 0, "pending_invalidated": 0,
+            "skipped_regime": 0,
+            "allowed_regimes": list(self.config.allowed_regimes),
+        }
 
         for index in range(start_index, end_index):
             candle = candles[index]
             stats["bars"] += 1
 
+            # --- pending signal lifecycle
             if position is None and pending is not None:
                 mode = pending.get("mode", "baseline")
                 if mode == "scenario":
@@ -229,6 +278,7 @@ class BacktestEngine:
                     elif pending["created_index"] < index - 1:
                         pending = None
 
+            # --- manage open position
             if position is not None:
                 position.bars_held += 1
                 result = self._process_bar(position, candle, equity)
@@ -238,10 +288,19 @@ class BacktestEngine:
                     position = None
                     stats["stops" if trade["exit_reason"] in ("STOP_LOSS", "BREAKEVEN") else "targets"] += 1
 
+            # --- decide on new signals
             if position is None and pending is None and index + 1 < end_index:
-                decision = self._decide(timeline, candle)
+                decision = self._decide(timeline, candle, regime_labels)
                 stats["decisions"] += 1
-                if decision is None or decision.action is DecisionAction.NO_TRADE:
+                if decision is None:
+                    # could be no evidence or regime-filtered; check if regime was the cause
+                    if regime_labels is not None:
+                        regime = regime_labels.get(candle.open_time)
+                        if regime is None or regime not in self.config.allowed_regimes:
+                            stats["skipped_regime"] += 1
+                            continue
+                    stats["no_trade"] += 1
+                elif decision.action is DecisionAction.NO_TRADE:
                     stats["no_trade"] += 1
                 elif decision.strength < self.config.min_signal_strength:
                     stats["skipped"] += 1
@@ -254,19 +313,33 @@ class BacktestEngine:
             unrealized = self._mark_to_market(position, candle.close) if position is not None else ZERO
             equity_curve.append((format_ts(candle.open_time), float(equity + unrealized)))
 
+        # --- close any open position at end
         if position is not None:
             last = candles[end_index - 1]
             trade, equity = self._close(position, last.close, "END_OF_DATA", last, equity)
             trades.append(trade)
             equity_curve[-1] = (format_ts(last.open_time), float(equity))
 
-        metrics = compute_metrics(trades, equity_curve, initial_equity=float(self.config.initial_equity),
-                                  timeframe=self.timeframe)
+        metrics = compute_metrics(
+            trades, equity_curve,
+            initial_equity=float(self.config.initial_equity),
+            timeframe=self.timeframe,
+        )
         stats["skipped_rate"] = round(stats["skipped"] / max(stats["decisions"], 1), 4)
         return BacktestOutput(trades=trades, equity_curve=equity_curve, metrics=metrics, stats=stats)
 
     # ------------------------------------------------------------------ تصمیم
-    def _decide(self, timeline: EvidenceTimeline, candle: Candle) -> Decision | None:
+    def _decide(
+        self,
+        timeline: EvidenceTimeline,
+        candle: Candle,
+        regime_labels: dict[datetime, str] | None = None,
+    ) -> Decision | None:
+        # P3-4-ext2: skip if the current regime is not in the allow-list
+        if regime_labels is not None:
+            regime = regime_labels.get(candle.open_time)
+            if regime is None or regime not in self.config.allowed_regimes:
+                return None
         evidences = timeline.at(candle.available_at)
         if not evidences:
             return None
@@ -290,8 +363,13 @@ class BacktestEngine:
             "mode": "baseline",
         }
 
-    def _plan_from_scenario(self, decision: Decision, candles: Sequence[Candle], index: int,
-                            timeline: EvidenceTimeline) -> dict[str, Any] | None:
+    def _plan_from_scenario(
+        self,
+        decision: Decision,
+        candles: Sequence[Candle],
+        index: int,
+        timeline: EvidenceTimeline,
+    ) -> dict[str, Any] | None:
         # FIX-05-BACKTEST-PARITY: استفاده از همان ScenarioBuilder زنده
         try:
             from fxars.analysis.engine import AnalysisOutcome
@@ -400,7 +478,12 @@ class BacktestEngine:
         )
 
     # ------------------------------------------------------------------ مدیریت
-    def _process_bar(self, position: _OpenTrade, candle: Candle, equity: Decimal) -> tuple[dict[str, Any], Decimal] | None:
+    def _process_bar(
+        self,
+        position: _OpenTrade,
+        candle: Candle,
+        equity: Decimal,
+    ) -> tuple[dict[str, Any], Decimal] | None:
         pip = self._pip
         if position.direction is Direction.LONG:
             if candle.low <= position.stop:
@@ -434,14 +517,26 @@ class BacktestEngine:
         if closed_volume <= ZERO:
             return
         sign = 1 if position.direction is Direction.LONG else -1
-        position.realized += (price - position.entry_price) * closed_volume * self._contract * self._quote_rate() * sign
+        position.realized += (
+            (price - position.entry_price)
+            * closed_volume
+            * self._contract
+            * self._quote_rate()
+            * sign
+        )
         position.remaining -= closed_volume
         position.tp1_hit = True
         if self.config.breakeven_after_tp1:
             position.stop = position.entry_price
 
-    def _close(self, position: _OpenTrade, price: Decimal, reason: str, candle: Candle,
-               equity: Decimal | None = None) -> tuple[dict[str, Any], Decimal]:
+    def _close(
+        self,
+        position: _OpenTrade,
+        price: Decimal,
+        reason: str,
+        candle: Candle,
+        equity: Decimal | None = None,
+    ) -> tuple[dict[str, Any], Decimal]:
         rate = self._quote_rate()
         sign = 1 if position.direction is Direction.LONG else -1
         remaining_pnl = (price - position.entry_price) * position.remaining * self._contract * rate * sign
@@ -495,8 +590,14 @@ class BacktestEngine:
         return self.config.quote_rates.get(self.instrument.quote_currency, Decimal("1"))
 
 
-def default_backtest_config(settings: BacktestSettings, *, min_signal_strength: float = 0.30,
-                            overrides: dict[str, Any] | None = None) -> BacktestConfig:
+def default_backtest_config(
+    settings: BacktestSettings,
+    *,
+    min_signal_strength: float = 0.30,
+    overrides: dict[str, Any] | None = None,
+) -> BacktestConfig:
     return BacktestConfig.from_settings(settings, overrides=overrides, min_signal_strength=min_signal_strength)
 
+
 # FIX-05-ENGINE-DONE
+# P3-4-ext2: regime filter support
