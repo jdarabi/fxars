@@ -261,6 +261,8 @@ class BacktestSettings:
     walkforward_test_bars: int = 200
     walkforward_step_bars: int = 200
     monte_carlo_runs: int = 200
+    # P3-4-ext3: regime filter (empty = allow all)
+    allowed_regimes: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BacktestSettings":
@@ -288,6 +290,7 @@ class BacktestSettings:
             walkforward_test_bars=int(data.get("walkforward_test_bars", 200)),
             walkforward_step_bars=int(data.get("walkforward_step_bars", 200)),
             monte_carlo_runs=int(data.get("monte_carlo_runs", 200)),
+            allowed_regimes=tuple(data.get("allowed_regimes", []) or ()),
         )
 
     def to_dict(self) -> dict[str, Any]:
