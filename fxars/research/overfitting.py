@@ -26,17 +26,44 @@ def _moments(values: Sequence[float]) -> tuple[float, float, float]:
     return skew, kurtosis, variance
 
 
-def deflated_sharpe_ratio(returns: Sequence[float], *, trials: int, periods_per_year: float = 1.0) -> dict[str, float | int | None]:
-    """DSR مطابق Bailey & López de Prado (احتمال اینکه SR واقعی > 0 باشد)."""
+def deflated_sharpe_ratio(
+    returns: Sequence[float],
+    *,
+    trials: int,
+    periods_per_year: float = 1.0,
+) -> dict[str, float | int | None]:
+    """DSR مطابق Bailey & López de Prado.
+
+    FIX-P1-4: ``sharpe`` با ``periods_per_year`` سالانهسازی میشود تا با
+    ``compute_metrics`` همخوان باشد.
+    """
     n = len(returns)
     if n < 5 or trials < 1:
         return {"sharpe": 0.0, "sr0": 0.0, "dsr": None, "trials": trials, "observations": n}
+
     sigma = stdev(returns)
-    sr = mean(returns) / sigma if sigma > 0 else 0.0
+    if sigma <= 0:
+        return {
+            "sharpe": 0.0, "sr0": 0.0, "dsr": None,
+            "trials": trials, "observations": n,
+            "skew": 0.0, "kurtosis": 3.0, "periods_per_year": periods_per_year,
+        }
+
+    per_period_sr = mean(returns) / sigma
+    sr = per_period_sr * math.sqrt(periods_per_year)
     skew, kurtosis, _ = _moments(returns)
+
     if n <= 1:
-        return {"sharpe": sr, "sr0": 0.0, "dsr": None, "trials": trials, "observations": n}
-    variance_sr = max((1 - skew * sr + (kurtosis - 1) / 4 * sr * sr) / (n - 1), 1e-12)
+        return {
+            "sharpe": round(sr, 6), "sr0": 0.0, "dsr": None,
+            "trials": trials, "observations": n,
+            "periods_per_year": periods_per_year,
+        }
+
+    variance_sr = max(
+        (1 - skew * per_period_sr + (kurtosis - 1) / 4 * per_period_sr * per_period_sr) / (n - 1),
+        1e-12,
+    )
     std_sr = math.sqrt(variance_sr)
     if trials == 1:
         sr0 = 0.0
@@ -45,8 +72,13 @@ def deflated_sharpe_ratio(returns: Sequence[float], *, trials: int, periods_per_
             (1 - EULER_GAMMA) * normal_ppf(1 - 1.0 / trials)
             + EULER_GAMMA * normal_ppf(1 - 1.0 / (trials * math.e))
         )
-    denominator = math.sqrt(max(1 - skew * sr + (kurtosis - 1) / 4 * sr * sr, 1e-12))
-    statistic = (sr - sr0) * math.sqrt(n - 1) / denominator
+
+    denominator = math.sqrt(max(
+        1 - skew * per_period_sr + (kurtosis - 1) / 4 * per_period_sr * per_period_sr,
+        1e-12,
+    ))
+    statistic = (per_period_sr - sr0) * math.sqrt(n - 1) / denominator
+
     return {
         "sharpe": round(sr, 6),
         "sr0": round(sr0, 6),
@@ -55,6 +87,7 @@ def deflated_sharpe_ratio(returns: Sequence[float], *, trials: int, periods_per_
         "observations": n,
         "skew": round(skew, 6),
         "kurtosis": round(kurtosis, 6),
+        "periods_per_year": periods_per_year,
     }
 
 

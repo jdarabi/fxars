@@ -136,9 +136,11 @@ class ResearchService:
                                 calendar=getattr(self, "_calendar", None))
         output = engine.simulate(context.candles, context.timeline, start_index=start, end_index=max(chosen.end, start + 2))
         metrics = dict(output.metrics)
+        from fxars.core.numerics import annualization_factor
         metrics["deflated_sharpe"] = deflated_sharpe_ratio(
-            equity_returns(output.equity_curve), trials=trials,
-            periods_per_year=252 * 24 if timeframe == "H1" else 252,
+            equity_returns(output.equity_curve),
+            trials=trials,
+            periods_per_year=annualization_factor(timeframe),
         )
         metrics["stats"] = output.stats
         metrics["segment"] = segment.value
