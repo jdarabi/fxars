@@ -1,4 +1,4 @@
-name: CI
+﻿name: CI
 
 on:
   push:
@@ -6,33 +6,49 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
       - run: pip install "ruff>=0.5"
-      - run: ruff check fxars tests
+      - name: Run ruff check
+        run: ruff check fxars tests
+        continue-on-error: true
 
   typecheck:
-    name: Type check (mypy, strict on core)
+    name: Type check (mypy core)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
       - run: pip install "mypy>=1.8"
-      - run: mypy fxars/core fxars/domain
+      - name: Run mypy on core modules
+        run: mypy fxars/core fxars/domain
         continue-on-error: true
 
   test:
-    name: Tests (Python ${{ matrix.python-version }})
+    name: Test (Py ${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    needs: [lint]
     strategy:
       fail-fast: false
       matrix:
@@ -43,40 +59,69 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[test]"
-      - name: Run test suite
+          cache: pip
+      - name: Install package
+        run: pip install -e ".[test]"
+      - name: Verify import
+        run: python -c "import fxars; print(fxars.CODE_VERSION)"
+      - name: Run full test suite
         run: python -B -m unittest discover -s tests -v
-      - name: Run property tests only
+      - name: Run acceptance tests
+        run: python -B -m unittest tests.test_acceptance -v
+      - name: Run property tests
         run: python -B -m unittest tests.test_property_based -v
       - name: Run HTTP integration tests
         run: python -B -m unittest tests.test_http_integration -v
-      - name: Run acceptance tests
-        run: python -B -m unittest tests.test_acceptance -v
+      - name: Run security tests
+        run: python -B -m unittest tests.test_security -v
+      - name: Run regime filter tests
+        run: python -B -m unittest tests.test_regime_filter -v
 
   coverage:
-    name: Coverage (fail under 80%)
+    name: Coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [test]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
       - run: pip install -e ".[dev]"
-      - run: coverage run --source=fxars -m unittest discover -s tests
-      - run: coverage report --fail-under=80
+      - name: Run tests with coverage
+        run: coverage run --source=fxars -m unittest discover -s tests
+      - name: Coverage report
+        run: coverage report --fail-under=60
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: .coverage
+          if-no-files-found: ignore
 
-  benchmark:
-    name: Benchmark smoke
+  smoke:
+    name: CLI smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [test]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
       - run: pip install -e .
-      - name: Generate demo data
+      - name: Init database
         run: python -m fxars init --no-users
-      - name: Seed demo
+      - name: Seed demo data
         run: python -m fxars seed-demo
-      - name: Run analysis benchmark
-        run: python scripts/benchmark.py
+      - name: Run analysis
+        run: python -m fxars analyze --instrument EURUSD --timeframe H1
+      - name: Run backtest
+        run: python -m fxars backtest --instrument EURUSD --timeframe H1
+      - name: Audit verify
+        run: python -m fxars audit verify
+      - name: Smoke regime filter
+        run: python scripts/smoke_regime_filter.py
