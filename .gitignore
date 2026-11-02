@@ -25,3 +25,4 @@ apply-p0-p1-fixes.ps1
 p0p1-tests.log
 full-suite.log
 test_results.log
+*.docx
