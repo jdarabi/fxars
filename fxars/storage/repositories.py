@@ -777,7 +777,6 @@ class LoginAttemptRepository:
 
     def __init__(self, db: Database, clock: Callable[[], datetime] | None = None) -> None:
         self.db = db
-        # FIX-P1-2b: honor injected clock so tests and demo use the same time source.
         self._clock = clock
 
     def _now(self) -> datetime:
@@ -887,6 +886,14 @@ class OrderRepository:
     def find_by_client_id(self, client_order_id: str) -> OrderIntent | None:
         row = self.db.query_one("SELECT payload FROM order_intents WHERE client_order_id=?", (client_order_id,))
         return OrderIntent.from_dict(_load(row["payload"])) if row else None
+
+    def list_intents_by_status(self, status: OrderStatus, *, limit: int = 500) -> list[OrderIntent]:
+        """P6-1: Find intents by status (used by ReconciliationService)."""
+        rows = self.db.query(
+            "SELECT payload FROM order_intents WHERE status=? ORDER BY created_at LIMIT ?",
+            (status.value, limit),
+        )
+        return [OrderIntent.from_dict(_load(row["payload"])) for row in rows]
 
     def save_broker_order(self, order: BrokerOrder) -> None:
         self.db.execute(
