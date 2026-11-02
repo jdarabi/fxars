@@ -256,6 +256,68 @@ class ResearchService:
         result["timeframe"] = timeframe
         return result
 
+    # ------------------------------------------------------------------ Purged CV
+    def run_purged_cv(
+        self,
+        instrument_id: str,
+        timeframe: str,
+        *,
+        n_splits: int = 5,
+        purge_bars: int = 10,
+        embargo_bars: int = 10,
+        as_of: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Run backtest across Purged K-Fold folds; report per-fold metrics."""
+        from fxars.research.purged_cv import (
+            assert_disjoint,
+            coverage_summary,
+            purged_kfold_indices,
+        )
+        context = self.prepare(instrument_id, timeframe, as_of=as_of)
+        n = len(context.candles)
+        folds = purged_kfold_indices(n, n_splits=n_splits,
+                                     purge_bars=purge_bars, embargo_bars=embargo_bars)
+        assert_disjoint(folds)
+        config = BacktestConfig.from_settings(
+            self.settings.backtest,
+            min_signal_strength=self.settings.risk.min_signal_strength,
+        )
+        engine = BacktestEngine(context.instrument, timeframe, config,
+                                self.settings.analysis,
+                                calendar=getattr(self, "_calendar", None))
+        fold_results: list[dict[str, Any]] = []
+        for fold in folds:
+            if not fold.train_indices or not fold.test_indices:
+                continue
+            start = max(min(fold.test_indices), self.settings.analysis.min_bars)
+            end = max(fold.test_indices) + 1
+            if end - start < 10:
+                continue
+            output = engine.simulate(
+                context.candles, context.timeline,
+                start_index=start, end_index=end,
+            )
+            fold_results.append({
+                "fold_id": fold.fold_id,
+                "test_size": fold.test_size,
+                "train_size": fold.train_size,
+                "metrics": {
+                    k: output.metrics[k]
+                    for k in ("trade_count", "net_profit", "profit_factor",
+                              "max_drawdown_pct", "sharpe")
+                    if k in output.metrics
+                },
+            })
+        return {
+            "instrument_id": instrument_id,
+            "timeframe": timeframe,
+            "n_splits": n_splits,
+            "purge_bars": purge_bars,
+            "embargo_bars": embargo_bars,
+            "folds": fold_results,
+            "coverage": coverage_summary(folds, n),
+        }
+
     def record_locked_test_access(self, run_id: str, *, actor: str, purpose: str) -> None:
         from fxars.core.ids import new_id
 
