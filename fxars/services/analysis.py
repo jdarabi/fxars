@@ -1,4 +1,4 @@
-"""سرویس اجرای تحلیل: داده → شواهد → تصمیم → سناریو → ثبت و ممیزی."""
+﻿"""سرویس اجرای تحلیل: داده → شواهد → تصمیم → سناریو → ثبت و ممیزی."""
 
 from __future__ import annotations
 
@@ -359,17 +359,6 @@ class AnalysisService:
                 scenario_reason=scenario_reason,
             )
 
-        if existing is not None and existing.result_hash == result_hash:
-            stored_evidence = self.analyses.evidence_for(run_id)
-            stored_scenario = self.scenarios.find_by_run(run_id)
-            return AnalysisResult(
-                run=existing,
-                outcome=outcome,
-                evidences=stored_evidence if stored_evidence else evidences,
-                decision=decision,
-                scenario=stored_scenario if stored_scenario else scenario,
-                scenario_reason=scenario_reason,
-            )
 
         decision_payload = decision.to_dict()
         decision_payload["scenario_id"] = scenario.scenario_id if scenario else None
