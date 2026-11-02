@@ -108,7 +108,6 @@ class ApiApp:
         self.routes: list[tuple[str, re.Pattern[str], Callable[..., ApiResponse], Permission | None, bool]] = []
         self._register()
 
-    # ------------------------------------------------------------------ routes
     def _register(self) -> None:
         def add(method: str, pattern: str, handler: Callable[..., ApiResponse],
                 permission: Permission | None = None, public: bool = False) -> None:
@@ -142,7 +141,6 @@ class ApiApp:
         add("GET", r"^/api/v1/killswitch$", self._killswitch_get, Permission.SCENARIO_READ)
         add("POST", r"^/api/v1/killswitch$", self._killswitch_set, Permission.KILLSWITCH_TOGGLE)
 
-    # ------------------------------------------------------------------ entry
     def handle(self, request: ApiRequest) -> ApiResponse:
         correlation = request.headers.get("x-correlation-id") or None
         with correlation_scope(correlation):
@@ -152,7 +150,6 @@ class ApiApp:
                 exc.correlation_id = exc.correlation_id or current_correlation_id()
                 return self._json(exc.http_status, exc.to_dict())
             except (ValueError, TypeError, KeyError) as exc:
-                # FIX-07-API-VALIDATION
                 error = ValidationError(
                     f"ورودی نامعتبر است: {exc}",
                     correlation_id=current_correlation_id(),
@@ -177,12 +174,12 @@ class ApiApp:
         if request.path in ("/docs", "/docs/"):
             return ApiResponse(200, docs_html().encode("utf-8"), "text/html; charset=utf-8")
 
-        matched_path = False
+        matched_methods: set[str] = set()
         for method, pattern, handler, permission, public in self.routes:
             match = pattern.match(request.path)
             if not match:
                 continue
-            matched_path = True
+            matched_methods.add(method)
             if method != request.method:
                 continue
             key = self._rate_key(request)
@@ -196,12 +193,20 @@ class ApiApp:
             if request.method == "POST" and not public:
                 return self._with_idempotency(request, user, lambda: handler(request, match.groupdict(), user))
             return handler(request, match.groupdict(), user)
-        if matched_path:
-            return self._json(405, {"error": {"code": "METHOD_NOT_ALLOWED", "message": "متد مجاز نیست.",
-                                              "correlation_id": current_correlation_id(), "details": {}}})
+        if matched_methods:
+            allow = ", ".join(sorted(matched_methods | {"OPTIONS"}))
+            return self._json(
+                405,
+                {"error": {
+                    "code": "METHOD_NOT_ALLOWED",
+                    "message": "متد مجاز نیست.",
+                    "correlation_id": current_correlation_id(),
+                    "details": {"method": request.method, "allowed": sorted(matched_methods)},
+                }},
+                headers={"Allow": allow},
+            )
         raise NotFoundError("مسیر درخواستی یافت نشد.", details={"path": request.path})
 
-    # ------------------------------------------------------------------ auth
     def _authenticate(self, request: ApiRequest):
         header = request.headers.get("authorization", "")
         if not header.lower().startswith("bearer "):
@@ -238,7 +243,6 @@ class ApiApp:
         self.platform.idempotency.put(key, user.user_id, request.path, request_hash, response.status, payload)
         return response
 
-    # ------------------------------------------------------------------ helpers
     def _json(self, status: int, payload: Any, headers: dict[str, str] | None = None) -> ApiResponse:
         body = json.dumps(jsonable(payload), ensure_ascii=False).encode("utf-8")
         merged = {"X-Correlation-ID": current_correlation_id()}
@@ -253,7 +257,6 @@ class ApiApp:
         offset = request.integer("offset", 0, minimum=0, maximum=10_000_000)
         return limit, offset
 
-    # ------------------------------------------------------------------ handlers
     def _health(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         db_ok = self.platform.db.query_one("SELECT 1 AS ok") is not None
         return self._json(200, {
@@ -281,7 +284,6 @@ class ApiApp:
         self.identity.logout(self._token(request), actor=user.username)
         return self._json(200, {"status": "logged_out"})
 
-    # ------------------------------------------------------------------ demo فقط لوکال
     def _demo_enabled(self, request: ApiRequest) -> bool:
         return self.settings.environment == "dev" and request.ip in ("127.0.0.1", "::1", "")
 
@@ -293,7 +295,6 @@ class ApiApp:
             )
 
     def _demo_login(self, request: ApiRequest, params: dict, user) -> ApiResponse:
-        """ورود سریع دمو فقط برای نقش‌های غیرمدیریتی (بدون افشای رمز)."""
         self._require_demo(request)
         body = request.json()
         role = str(body.get("role", "ANALYST")).upper()
@@ -318,7 +319,6 @@ class ApiApp:
         })
 
     def _demo_totp(self, request: ApiRequest, params: dict, user) -> ApiResponse:
-        """کد TOTP جاری برای سهولت دمو؛ فقط localhost و environment=dev."""
         self._require_demo(request)
         from fxars.identity.totp import totp
 
@@ -367,7 +367,6 @@ class ApiApp:
         return self._json(200, {"items": items, "count": len(items)})
 
     def _candles(self, request: ApiRequest, params: dict, user) -> ApiResponse:
-        # FIX-12-CANDLES-PAGINATION
         instrument_id = request.one("instrument_id")
         timeframe = request.one("timeframe", "H1")
         if not instrument_id:
@@ -422,7 +421,6 @@ class ApiApp:
             "count": len(selected),
             "total": total,
             "order": order,
-            "order": order,
             "limit": limit,
             "offset": offset,
             "items": [candle.to_dict() for candle in selected],
@@ -444,7 +442,6 @@ class ApiApp:
         timeframe = str(body.get("timeframe", "H1")).upper()
         if not instrument_id:
             raise ValidationError("instrument_id الزامی است.")
-        # FIX-07-API-VALIDATION
         from fxars.domain.enums import Timeframe as _TF
         try:
             _TF.parse(timeframe)
@@ -646,8 +643,36 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE, PUT, PATCH, HEAD")
         self.end_headers()
+
+    def _method_not_allowed(self, method: str) -> None:
+        body = json.dumps({
+            "error": {
+                "code": "METHOD_NOT_ALLOWED",
+                "message": "متد مجاز نیست.",
+                "correlation_id": "",
+                "details": {"method": method, "allowed": ["GET", "POST", "OPTIONS", "HEAD"]},
+            }
+        }, ensure_ascii=False).encode("utf-8")
+        self.send_response(405)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Allow", "GET, POST, OPTIONS, HEAD")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._method_not_allowed("DELETE")
+
+    def do_PUT(self) -> None:  # noqa: N802
+        self._method_not_allowed("PUT")
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        self._method_not_allowed("PATCH")
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self._handle("HEAD")
 
     def log_message(self, format: str, *args: Any) -> None:
         logger.info("http", extra={"data": {"client": self.client_address[0], "message": format % args}})
