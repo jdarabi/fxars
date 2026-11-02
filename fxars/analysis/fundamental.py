@@ -23,7 +23,11 @@ class FundamentalModule:
     def compute(self, context: AnalysisContext, factory: EvidenceFactory) -> list[Evidence]:
         settings = context.settings
         instrument = context.instrument
-        lookback = context.as_of - timedelta(hours=settings.fundamental_lookback_hours)
+        # FIX-04-FUNDAMENTAL-HISTORY: lookback از اولین کندل، نه as_of نهایی
+        if context.candles:
+            lookback = context.candles[0].open_time - timedelta(hours=settings.fundamental_lookback_hours)
+        else:
+            lookback = context.as_of - timedelta(hours=settings.fundamental_lookback_hours)
         evidences: list[Evidence] = []
         base = instrument.base_currency.upper()
         quote = instrument.quote_currency.upper()

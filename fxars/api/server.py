@@ -108,7 +108,6 @@ class ApiApp:
         self.routes: list[tuple[str, re.Pattern[str], Callable[..., ApiResponse], Permission | None, bool]] = []
         self._register()
 
-    # ------------------------------------------------------------------ routes
     def _register(self) -> None:
         def add(method: str, pattern: str, handler: Callable[..., ApiResponse],
                 permission: Permission | None = None, public: bool = False) -> None:
@@ -142,7 +141,6 @@ class ApiApp:
         add("GET", r"^/api/v1/killswitch$", self._killswitch_get, Permission.SCENARIO_READ)
         add("POST", r"^/api/v1/killswitch$", self._killswitch_set, Permission.KILLSWITCH_TOGGLE)
 
-    # ------------------------------------------------------------------ entry
     def handle(self, request: ApiRequest) -> ApiResponse:
         correlation = request.headers.get("x-correlation-id") or None
         with correlation_scope(correlation):
@@ -151,6 +149,13 @@ class ApiApp:
             except FxarsError as exc:
                 exc.correlation_id = exc.correlation_id or current_correlation_id()
                 return self._json(exc.http_status, exc.to_dict())
+            except (ValueError, TypeError, KeyError) as exc:
+                error = ValidationError(
+                    f"ورودی نامعتبر است: {exc}",
+                    correlation_id=current_correlation_id(),
+                    details={"path": request.path, "type": type(exc).__name__},
+                )
+                return self._json(error.http_status, error.to_dict())
             except Exception:
                 logger.exception("unhandled api error", extra={"data": {"path": request.path}})
                 from fxars.core.errors import FxarsError as Base
@@ -169,12 +174,12 @@ class ApiApp:
         if request.path in ("/docs", "/docs/"):
             return ApiResponse(200, docs_html().encode("utf-8"), "text/html; charset=utf-8")
 
-        matched_path = False
+        matched_methods: set[str] = set()
         for method, pattern, handler, permission, public in self.routes:
             match = pattern.match(request.path)
             if not match:
                 continue
-            matched_path = True
+            matched_methods.add(method)
             if method != request.method:
                 continue
             key = self._rate_key(request)
@@ -188,12 +193,20 @@ class ApiApp:
             if request.method == "POST" and not public:
                 return self._with_idempotency(request, user, lambda: handler(request, match.groupdict(), user))
             return handler(request, match.groupdict(), user)
-        if matched_path:
-            return self._json(405, {"error": {"code": "METHOD_NOT_ALLOWED", "message": "متد مجاز نیست.",
-                                              "correlation_id": current_correlation_id(), "details": {}}})
+        if matched_methods:
+            allow = ", ".join(sorted(matched_methods | {"OPTIONS"}))
+            return self._json(
+                405,
+                {"error": {
+                    "code": "METHOD_NOT_ALLOWED",
+                    "message": "متد مجاز نیست.",
+                    "correlation_id": current_correlation_id(),
+                    "details": {"method": request.method, "allowed": sorted(matched_methods)},
+                }},
+                headers={"Allow": allow},
+            )
         raise NotFoundError("مسیر درخواستی یافت نشد.", details={"path": request.path})
 
-    # ------------------------------------------------------------------ auth
     def _authenticate(self, request: ApiRequest):
         header = request.headers.get("authorization", "")
         if not header.lower().startswith("bearer "):
@@ -230,7 +243,6 @@ class ApiApp:
         self.platform.idempotency.put(key, user.user_id, request.path, request_hash, response.status, payload)
         return response
 
-    # ------------------------------------------------------------------ helpers
     def _json(self, status: int, payload: Any, headers: dict[str, str] | None = None) -> ApiResponse:
         body = json.dumps(jsonable(payload), ensure_ascii=False).encode("utf-8")
         merged = {"X-Correlation-ID": current_correlation_id()}
@@ -245,7 +257,6 @@ class ApiApp:
         offset = request.integer("offset", 0, minimum=0, maximum=10_000_000)
         return limit, offset
 
-    # ------------------------------------------------------------------ handlers
     def _health(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         db_ok = self.platform.db.query_one("SELECT 1 AS ok") is not None
         return self._json(200, {
@@ -273,7 +284,6 @@ class ApiApp:
         self.identity.logout(self._token(request), actor=user.username)
         return self._json(200, {"status": "logged_out"})
 
-    # ------------------------------------------------------------------ demo فقط لوکال
     def _demo_enabled(self, request: ApiRequest) -> bool:
         return self.settings.environment == "dev" and request.ip in ("127.0.0.1", "::1", "")
 
@@ -285,7 +295,6 @@ class ApiApp:
             )
 
     def _demo_login(self, request: ApiRequest, params: dict, user) -> ApiResponse:
-        """ورود سریع دمو فقط برای نقش‌های غیرمدیریتی (بدون افشای رمز)."""
         self._require_demo(request)
         body = request.json()
         role = str(body.get("role", "ANALYST")).upper()
@@ -310,7 +319,6 @@ class ApiApp:
         })
 
     def _demo_totp(self, request: ApiRequest, params: dict, user) -> ApiResponse:
-        """کد TOTP جاری برای سهولت دمو؛ فقط localhost و environment=dev."""
         self._require_demo(request)
         from fxars.identity.totp import totp
 
@@ -363,16 +371,58 @@ class ApiApp:
         timeframe = request.one("timeframe", "H1")
         if not instrument_id:
             raise ValidationError("پارامتر instrument_id الزامی است.")
-        start = parse_ts(request.one("start")) if request.one("start") else None
-        end = parse_ts(request.one("end")) if request.one("end") else None
-        limit, _ = self._page(request)
-        candles = self.platform.candles.range(instrument_id, timeframe, start=start, end=end, limit=None)
-        selected = candles[-limit:]
+        try:
+            from fxars.domain.enums import Timeframe as _TF
+            _TF.parse(timeframe)
+        except ValueError:
+            raise ValidationError(f"timeframe نامعتبر است: {timeframe!r}") from None
+
+        source_id = request.one("source_id")
+        if not source_id:
+            try:
+                source_id = self.platform.instruments.primary_source(instrument_id, timeframe)
+            except Exception:
+                source_id = None
+
+        start = None
+        if request.one("start"):
+            try:
+                start = parse_ts(request.one("start"))
+            except ValueError as exc:
+                raise ValidationError(f"start نامعتبر است: {exc}") from None
+        end = None
+        if request.one("end"):
+            try:
+                end = parse_ts(request.one("end"))
+            except ValueError as exc:
+                raise ValidationError(f"end نامعتبر است: {exc}") from None
+
+        limit, offset = self._page(request)
+        limit = min(limit, 5000)
+
+        candles = self.platform.candles.range(
+            instrument_id, timeframe, source_id=source_id,
+            start=start, end=end, closed_only=True,
+        )
+        total = len(candles)
+        order = (request.one("order") or "desc").lower()
+        if order == "asc":
+            start_index = min(offset, total)
+            end_index = min(offset + limit, total)
+            selected = candles[start_index:end_index]
+        else:
+            end_index = max(0, total - offset)
+            start_index = max(0, end_index - limit)
+            selected = candles[start_index:end_index]
         return self._json(200, {
             "instrument_id": instrument_id,
             "timeframe": timeframe,
+            "source_id": source_id,
             "count": len(selected),
-            "total": len(candles),
+            "total": total,
+            "order": order,
+            "limit": limit,
+            "offset": offset,
             "items": [candle.to_dict() for candle in selected],
         })
 
@@ -389,10 +439,23 @@ class ApiApp:
     def _analysis_create(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         body = request.json()
         instrument_id = body.get("instrument_id")
-        timeframe = body.get("timeframe", "H1")
+        timeframe = str(body.get("timeframe", "H1")).upper()
         if not instrument_id:
             raise ValidationError("instrument_id الزامی است.")
-        as_of = parse_ts(body["as_of"]) if body.get("as_of") else None
+        from fxars.domain.enums import Timeframe as _TF
+        try:
+            _TF.parse(timeframe)
+        except ValueError:
+            raise ValidationError(
+                f"timeframe نامعتبر است: {timeframe!r}",
+                details={"allowed": [t.value for t in _TF]},
+            ) from None
+        as_of = None
+        if body.get("as_of"):
+            try:
+                as_of = parse_ts(body["as_of"])
+            except ValueError as exc:
+                raise ValidationError(f"as_of نامعتبر است: {exc}") from None
         result = self.platform.run_analysis(instrument_id, timeframe, as_of=as_of, actor=user.username)
         return self._json(200, {
             "run": result.run.to_dict(),
@@ -488,7 +551,13 @@ class ApiApp:
         timeframe = body.get("timeframe", "H1")
         if not instrument_id:
             raise ValidationError("instrument_id الزامی است.")
-        segment = BacktestSegment(str(body.get("segment", "ALL")).upper())
+        try:
+            segment = BacktestSegment(str(body.get("segment", "ALL")).upper())
+        except ValueError:
+            raise ValidationError(
+                f"segment نامعتبر است: {body.get('segment')!r}",
+                details={"allowed": [s.value for s in BacktestSegment]},
+            ) from None
         as_of = parse_ts(body["as_of"]) if body.get("as_of") else None
         result = self.platform.research.run(
             instrument_id, timeframe, config_overrides=body.get("overrides") or {},
@@ -540,8 +609,20 @@ class _Handler(BaseHTTPRequestHandler):
     def _handle(self, method: str) -> None:
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length") or 0)
-        if length > self.server.app.settings.api.max_body_bytes:  # type: ignore[attr-defined]
-            self._send(ApiResponse(413, b'{"error":{"code":"PAYLOAD_TOO_LARGE","message":"Request body too large."}}'))
+        max_bytes = self.server.app.settings.api.max_body_bytes  # type: ignore[attr-defined]
+        if length > max_bytes:
+            # FIX-P2-3: drain body so client can finish sending and read the 413 response
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+            self._send(ApiResponse(
+                413,
+                b'{"error":{"code":"PAYLOAD_TOO_LARGE","message":"Request body too large.","correlation_id":"","details":{}}}',
+                headers={"Connection": "close"},
+            ))
             return
         body = self.rfile.read(length) if length else b""
         request = ApiRequest(
@@ -574,8 +655,36 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE, PUT, PATCH, HEAD")
         self.end_headers()
+
+    def _method_not_allowed(self, method: str) -> None:
+        body = json.dumps({
+            "error": {
+                "code": "METHOD_NOT_ALLOWED",
+                "message": "متد مجاز نیست.",
+                "correlation_id": "",
+                "details": {"method": method, "allowed": ["GET", "POST", "OPTIONS", "HEAD"]},
+            }
+        }, ensure_ascii=False).encode("utf-8")
+        self.send_response(405)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Allow", "GET, POST, OPTIONS, HEAD")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._method_not_allowed("DELETE")
+
+    def do_PUT(self) -> None:  # noqa: N802
+        self._method_not_allowed("PUT")
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        self._method_not_allowed("PATCH")
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self._handle("HEAD")
 
     def log_message(self, format: str, *args: Any) -> None:
         logger.info("http", extra={"data": {"client": self.client_address[0], "message": format % args}})

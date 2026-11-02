@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from fxars.core.errors import NotFoundError
 from fxars.core.ids import stable_id
@@ -126,6 +126,41 @@ class InstrumentRepository:
             (source_id, broker_symbol, format_ts(at), format_ts(at)),
         )
         return row["instrument_id"] if row else None
+
+    def primary_source(self, instrument_id: str, timeframe: str) -> str:
+        """FIX-03-PRIMARY-SOURCE: انتخاب منبع اصلی برای تحلیل/بک‌تست.
+
+        اگر فقط یک منبع وجود دارد همان برگردانده می‌شود؛ در غیر این صورت از
+        DataSource.priority استفاده می‌شود؛ در نهایت نام منبع به‌صورت صریح خطا می‌دهد.
+        """
+        sources = self.db.query(
+            "SELECT source_id FROM candles WHERE instrument_id=? AND timeframe=? "
+            "GROUP BY source_id ORDER BY source_id",
+            (instrument_id, Timeframe.parse(timeframe).value),
+        )
+        ids = [row["source_id"] for row in sources]
+        if not ids:
+            raise NotFoundError(
+                f"هیچ منبع داده‌ای برای {instrument_id}/{timeframe} ثبت نشده است.",
+                details={"instrument_id": instrument_id, "timeframe": timeframe},
+            )
+        if len(ids) == 1:
+            return ids[0]
+        priority_rows = self.db.query(
+            "SELECT source_id, payload FROM data_sources WHERE source_id IN ({})".format(
+                ",".join("?" for _ in ids)
+            ),
+            ids,
+        )
+        ranked: list[tuple[int, str]] = []
+        for row in priority_rows:
+            payload = _load(row["payload"])
+            ranked.append((int(payload.get("priority", 100)), row["source_id"]))
+        ranked.sort()
+        for _, sid in ranked:
+            if sid in ids:
+                return sid
+        return ids[0]
 
     def seed_defaults(self, instruments: Iterable[Instrument], source: DataSource) -> int:
         count = 0
@@ -370,7 +405,10 @@ class AnalysisRepository:
         )
 
     def evidence_for(self, run_id: str) -> list[Evidence]:
-        rows = self.db.query("SELECT payload FROM evidences WHERE run_id=? ORDER BY observed_at, module_id", (run_id,))
+        # FIX-P1-1b: stable ordering by evidence_id so replay and first run agree.
+        rows = self.db.query(
+            "SELECT payload FROM evidences WHERE run_id=? ORDER BY evidence_id", (run_id,),
+        )
         return [Evidence.from_dict(_row_payload(row)) for row in rows]
 
 
@@ -720,24 +758,51 @@ class SessionRepository:
     def revoke(self, token_hash: str) -> None:
         self.db.execute("UPDATE sessions SET revoked=1 WHERE token_hash=?", (token_hash,))
 
+    def revoke_all(self, user_id: str) -> int:
+        """FIX-P0-3: revoke all active sessions for a user (password/role change)."""
+        cur = self.db.execute("UPDATE sessions SET revoked=1 WHERE user_id=? AND revoked=0", (user_id,))
+        return cur.rowcount
+
     def purge_expired(self, now: datetime) -> int:
         cur = self.db.execute("DELETE FROM sessions WHERE expires_at < ?", (format_ts(now),))
         return cur.rowcount
 
 
 class LoginAttemptRepository:
-    def __init__(self, db: Database) -> None:
+    """FIX-P1-2: شمارش شکست‌های متوالی ورود با ترتیب ثبت (id) — نه مقایسه رشته‌ای زمان.
+
+    دلیل: وقتی چند شکست در همان ثانیه ثبت می‌شوند، کوئری ``attempted_at > MAX(success)``
+    آن‌ها را از دست می‌دهد. با ``ORDER BY id DESC`` ترتیب واقعی ثبت حفظ می‌شود.
+    """
+
+    def __init__(self, db: Database, clock: Callable[[], datetime] | None = None) -> None:
         self.db = db
+        # FIX-P1-2b: honor injected clock so tests and demo use the same time source.
+        self._clock = clock
+
+    def _now(self) -> datetime:
+        return self._clock() if self._clock is not None else utcnow()
 
     def add(self, username: str, ip: str, success: bool) -> None:
-        self.db.execute("INSERT INTO login_attempts (username, ip, attempted_at, success) VALUES (?, ?, ?, ?)",
-                        (username, ip, format_ts(utcnow()), 1 if success else 0))
+        self.db.execute(
+            "INSERT INTO login_attempts (username, ip, attempted_at, success) VALUES (?, ?, ?, ?)",
+            (username, ip, format_ts(self._now()), 1 if success else 0),
+        )
 
     def failures_since(self, username: str, since: datetime) -> int:
-        return int(self.db.scalar(
-            "SELECT COUNT(*) FROM login_attempts WHERE username=? AND success=0 AND attempted_at>=?",
+        """تعداد شکست‌های متوالی از آخرین ورودِ موفق تا کنون (در پنجره since)."""
+        rows = self.db.query(
+            "SELECT success FROM login_attempts "
+            "WHERE username=? AND attempted_at>=? "
+            "ORDER BY id DESC",
             (username, format_ts(since)),
-        ) or 0)
+        )
+        count = 0
+        for row in rows:
+            if row["success"]:
+                break
+            count += 1
+        return count
 
 
 class IdempotencyRepository:

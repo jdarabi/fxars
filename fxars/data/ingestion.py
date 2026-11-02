@@ -83,44 +83,53 @@ class IngestionService:
 
         moment = now or utcnow()
         validator = CandleValidator(instrument, now=moment)
+        # FIX-01-INGESTION-TX: کل چرخه در یک تراکنش واحد.
         accepted: list[Candle] = []
-        quarantined = 0
+        quarantine_items: list[tuple[Candle, tuple[str, ...]]] = []
         for candle in candles:
             assessment = validator.assess(candle)
             if assessment.status.value == "INVALID":
-                self.candles.quarantine(candle, assessment.reasons or assessment.flags)
-                quarantined += 1
+                quarantine_items.append((candle, tuple(assessment.reasons or assessment.flags)))
             else:
                 stored = candle
                 if assessment.status.value == "SUSPECT" and not candle.quality_flags:
                     stored = replace(candle, quality_status="SUSPECT", quality_flags=assessment.flags)
                 accepted.append(stored)
 
-        stats = self.candles.bulk_upsert(accepted) if accepted else {"inserted": 0, "duplicate": 0, "revised": 0}
-
-        # کیفیت روی کل سری ذخیره‌شده همان منبع سنجیده می‌شود، نه فقط دسته جدید.
-        series = self.candles.range(instrument_id, tf, source_id=source_id, closed_only=False)
-        reference_series = None
-        if evaluate_reference:
-            other_sources = [source for source in self.candles.sources(instrument_id, tf) if source != source_id]
-            if other_sources:
-                reference_series = self.candles.range(instrument_id, tf, source_id=other_sources[0], closed_only=False)
-        quality_run = self.quality.evaluate(
-            instrument=instrument, timeframe=tf, source_id=source_id, candles=series,
-            now=moment, reference_candles=reference_series,
-        )
-
-        raw_id = None
-        if raw_content is not None:
-            raw_id = self.raw_payloads.store(source_id, "candles_csv", raw_content, meta=raw_meta or {}, received_at=moment)
+        stats = {"inserted": 0, "duplicate": 0, "revised": 0}
+        quality_run: DataQualityRun | None = None
+        snapshot = ""
+        raw_id: str | None = None
 
         with self.db.transaction():
+            for candle, reasons in quarantine_items:
+                self.candles.quarantine(candle, reasons)
+            quarantined = len(quarantine_items)
+            if accepted:
+                stats = self.candles.bulk_upsert(accepted)
+            if raw_content is not None:
+                raw_id = self.raw_payloads.store(
+                    source_id, "candles_csv", raw_content,
+                    meta=raw_meta or {}, received_at=moment,
+                )
+            series = self.candles.range(
+                instrument_id, tf, source_id=source_id, closed_only=False,
+            )
+            reference_series = None
+            if evaluate_reference:
+                other_sources = [s for s in self.candles.sources(instrument_id, tf) if s != source_id]
+                if other_sources:
+                    reference_series = self.candles.range(
+                        instrument_id, tf, source_id=other_sources[0], closed_only=False,
+                    )
+            quality_run = self.quality.evaluate(
+                instrument=instrument, timeframe=tf, source_id=source_id,
+                candles=series, now=moment, reference_candles=reference_series,
+            )
             self.quality_runs.save(quality_run)
             snapshot = snapshot_id(series, instrument_id, tf)
             self.audit.append(
-                AuditAction.DATA_INGESTED,
-                "candle_batch",
-                snapshot,
+                AuditAction.DATA_INGESTED, "candle_batch", snapshot,
                 payload={
                     "instrument_id": instrument_id,
                     "timeframe": tf,
@@ -134,21 +143,13 @@ class IngestionService:
             )
             if quarantined:
                 self.audit.append(
-                    AuditAction.DATA_QUARANTINED,
-                    "candle_batch",
-                    snapshot,
+                    AuditAction.DATA_QUARANTINED, "candle_batch", snapshot,
                     payload={"instrument_id": instrument_id, "count": quarantined},
                 )
             self.outbox.emit(
                 EventType.CANDLES_INGESTED,
-                {
-                    "instrument_id": instrument_id,
-                    "timeframe": tf,
-                    "source_id": source_id,
-                    "accepted": len(accepted),
-                    "quarantined": quarantined,
-                    "snapshot_id": snapshot,
-                },
+                {"instrument_id": instrument_id, "timeframe": tf, "source_id": source_id,
+                 "accepted": len(accepted), "quarantined": quarantined, "snapshot_id": snapshot},
                 occurred_at=moment,
             )
             self.outbox.emit(
@@ -162,7 +163,7 @@ class IngestionService:
             timeframe=tf,
             source_id=source_id,
             accepted=len(accepted),
-            quarantined=quarantined,
+            quarantined=len(quarantine_items),
             duplicates=stats["duplicate"],
             revised=stats["revised"],
             quality=quality_run,

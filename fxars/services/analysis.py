@@ -92,9 +92,13 @@ class AnalysisService:
         correlation = current_correlation_id()
         started_at = self.clock()
 
+        # PRIMARY_SOURCE_ANALYSIS: تحلیل فقط روی منبع اصلی انجام می‌شود.
+        primary_source = self.instruments.primary_source(instrument_id, tf.value)
         candles = [
             candle
-            for candle in self.candles.range(instrument_id, tf.value, as_of=moment, closed_only=True)
+            for candle in self.candles.range(
+                instrument_id, tf.value, source_id=primary_source, as_of=moment, closed_only=True,
+            )
             if candle.quality_status is not QualityStatus.INVALID
         ]
         latest = candles[-1] if candles else None
@@ -258,7 +262,13 @@ class AnalysisService:
     def _references(self, instrument_id: str, timeframe: str, moment: datetime) -> dict[str, list]:
         references: dict[str, list] = {}
         for reference_id in self.settings.analysis.intermarket_refs.get(instrument_id, []):
-            candles = self.candles.range(reference_id, timeframe, as_of=moment, closed_only=True)
+            try:
+                ref_source = self.instruments.primary_source(reference_id, timeframe)
+            except Exception:
+                continue
+            candles = self.candles.range(
+                reference_id, timeframe, source_id=ref_source, as_of=moment, closed_only=True,
+            )
             if candles:
                 references[reference_id] = candles
         return references
@@ -287,16 +297,27 @@ class AnalysisService:
         finished = self.clock()
         # ترتیب/شناسه شواهد بخشی از هویت نتیجه نیست؛ هش بر تصمیم + امضای معنایی شواهد است.
         evidences = sorted(evidences, key=lambda evidence: evidence.evidence_id)
+        # FIX-13-RESULT-HASH: امضای کامل Evidence
         signature = sorted(
             (
                 {
                     "module_id": evidence.module_id,
+                    "module_version": evidence.module_version,
                     "family": evidence.family.value,
                     "observed_at": format_ts(evidence.observed_at),
                     "available_at": format_ts(evidence.available_at),
                     "direction": evidence.direction.value,
                     "strength": evidence.strength,
                     "confidence_raw": evidence.confidence_raw,
+                    "price_zone": (
+                        {"low": format(evidence.price_zone.low, "f"),
+                         "high": format(evidence.price_zone.high, "f")}
+                        if evidence.price_zone else None
+                    ),
+                    "invalidation": evidence.invalidation,
+                    "expiry": format_ts(evidence.expiry) if evidence.expiry else None,
+                    "parameters_hash": evidence.parameters_hash,
+                    "source_refs": list(evidence.source_refs),
                 }
                 for evidence in evidences
             ),
@@ -324,6 +345,30 @@ class AnalysisService:
                     "action": decision.action.value,
                     "score": decision.score,
                 },
+            )
+
+        if existing is not None and existing.result_hash == result_hash:
+            stored_evidence = self.analyses.evidence_for(run_id)
+            stored_scenario = self.scenarios.find_by_run(run_id)
+            return AnalysisResult(
+                run=existing,
+                outcome=outcome,
+                evidences=stored_evidence if stored_evidence else evidences,
+                decision=decision,
+                scenario=stored_scenario if stored_scenario else scenario,
+                scenario_reason=scenario_reason,
+            )
+
+        if existing is not None and existing.result_hash == result_hash:
+            stored_evidence = self.analyses.evidence_for(run_id)
+            stored_scenario = self.scenarios.find_by_run(run_id)
+            return AnalysisResult(
+                run=existing,
+                outcome=outcome,
+                evidences=stored_evidence if stored_evidence else evidences,
+                decision=decision,
+                scenario=stored_scenario if stored_scenario else scenario,
+                scenario_reason=scenario_reason,
             )
 
         decision_payload = decision.to_dict()

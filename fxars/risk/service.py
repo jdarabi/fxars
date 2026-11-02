@@ -73,7 +73,15 @@ class RiskService:
         snapshot = self._account(account, moment)
         candle = None
         if instrument is not None:
-            candles = self.candles.range(scenario.instrument_id, scenario.timeframe, as_of=moment, closed_only=True)
+            # PRIMARY_SOURCE_RISK: انتخاب منبع اصلی برای ریسک
+            try:
+                primary_source = self.instruments.primary_source(scenario.instrument_id, scenario.timeframe)
+            except Exception:
+                primary_source = None
+            candles = self.candles.range(
+                scenario.instrument_id, scenario.timeframe, source_id=primary_source,
+                as_of=moment, closed_only=True,
+            )
             candle = candles[-1] if candles else None
         events = self.events.between(moment - timedelta(days=1), moment + timedelta(days=2), as_of=None)
         instruments = {instrument.instrument_id: instrument} if instrument else {}
@@ -141,7 +149,12 @@ class RiskService:
     def _correlations(self, instrument_id: str, other_ids: list[str], timeframe: str, now: datetime) -> dict[str, float]:
         from fxars.core.numerics import correlation
 
-        base = self.candles.range(instrument_id, timeframe, as_of=now, closed_only=True)
+        try:
+            base_source = self.instruments.primary_source(instrument_id, timeframe)
+        except Exception:
+            base_source = None
+        base = self.candles.range(instrument_id, timeframe, source_id=base_source,
+                                  as_of=now, closed_only=True)
         if len(base) < 30:
             return {}
         base_returns = {
@@ -154,7 +167,12 @@ class RiskService:
             if other_id == instrument_id:
                 result[other_id] = 1.0
                 continue
-            other = self.candles.range(other_id, timeframe, as_of=now, closed_only=True)
+            try:
+                other_source = self.instruments.primary_source(other_id, timeframe)
+            except Exception:
+                other_source = None
+            other = self.candles.range(other_id, timeframe, source_id=other_source,
+                                       as_of=now, closed_only=True)
             if len(other) < 30:
                 result[other_id] = 0.0
                 continue

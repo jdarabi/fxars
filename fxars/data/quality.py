@@ -124,9 +124,11 @@ class DataQualityEngine:
         suspect = sum(1 for status in statuses if status is QualityStatus.SUSPECT)
         invalid = sum(1 for status in statuses if status is QualityStatus.INVALID)
 
-        if invalid or stale:
+        # FIX-02-VERDICT-SEVERITY: verdict بر اساس شدت Issueها
+        severities = {issue.severity for issue in issues}
+        if invalid > 0 or stale or "ERROR" in severities:
             verdict = "FAIL"
-        elif suspect or missing:
+        elif suspect > 0 or missing > 0 or "WARN" in severities:
             verdict = "WARN"
         else:
             verdict = "PASS"

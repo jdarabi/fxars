@@ -90,7 +90,7 @@ class Platform:
         self.raw_payloads = RawPayloadRepository(self.db)
         self.users = UserRepository(self.db)
         self.sessions = SessionRepository(self.db)
-        self.attempts = LoginAttemptRepository(self.db)
+        self.attempts = LoginAttemptRepository(self.db, clock=self.clock)
         self.idempotency = IdempotencyRepository(self.db)
         self.audit_repo = AuditRepository(self.db)
         self.outbox_repo = OutboxRepository(self.db)
@@ -137,6 +137,8 @@ class Platform:
             events=self.events, backtests=self.backtests, locked_tests=self.locked_tests,
             engine=self.analysis_engine, audit=self.audit, outbox=self.outbox,
         )
+        # FIX-05-PLATFORM-CALENDAR: calendar به ResearchService برای parity
+        self.research._calendar = self.calendar
         self.walkforward = WalkForwardRunner(self.settings, self.research)
         self.execution = ExecutionService(
             settings=self.settings, clock=self.clock, scenarios=self.scenarios, decisions=self.decisions,
