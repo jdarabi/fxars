@@ -1,9 +1,8 @@
-"""HTTP API با کتابخانه استاندارد (بدون وابستگی خارجی).
+﻿"""HTTP API با کتابخانه استاندارد (بدون وابستگی خارجی).
 
 قرارداد: مسیرهای نسخه‌دار /api/v1، خطای ساختاریافته، RBAC سمت سرور، rate limit،
 Idempotency-Key برای عملیات حساس و correlation_id در همه پاسخ‌ها.
 """
-
 from __future__ import annotations
 
 import json
@@ -28,6 +27,7 @@ from fxars.core.errors import (
 )
 from fxars.core.hashing import sha256_obj
 from fxars.core.logging_setup import get_logger
+from fxars.api.metrics import get_registry
 from fxars.core.serde import jsonable
 from fxars.core.timeutil import format_ts, parse_ts
 from fxars.domain.enums import BacktestSegment, Permission, ScenarioStatus
@@ -106,6 +106,7 @@ class ApiApp:
         self.identity = platform.identity
         self.limiter = RateLimiter(self.settings.api.rate_limit_per_minute, 60)
         self.routes: list[tuple[str, re.Pattern[str], Callable[..., ApiResponse], Permission | None, bool]] = []
+        self.metrics = get_registry()
         self._register()
 
     def _register(self) -> None:
@@ -114,6 +115,9 @@ class ApiApp:
             self.routes.append((method, re.compile(pattern), handler, permission, public))
 
         add("GET", r"^/api/v1/health$", self._health, public=True)
+        add("GET", r"^/api/v1/health/live$", self._health_live, public=True)
+        add("GET", r"^/api/v1/health/ready$", self._health_ready, public=True)
+        add("GET", r"^/api/v1/metrics$", self._metrics_endpoint, public=True)
         add("POST", r"^/api/v1/auth/login$", self._login, public=True)
         add("POST", r"^/api/v1/auth/demo-login$", self._demo_login, public=True)
         add("GET", r"^/api/v1/auth/demo-totp$", self._demo_totp, public=True)
@@ -256,6 +260,22 @@ class ApiApp:
         limit = request.integer("limit", self.settings.api.page_size_default, maximum=self.settings.api.page_size_max)
         offset = request.integer("offset", 0, minimum=0, maximum=10_000_000)
         return limit, offset
+
+    def _health_live(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        from fxars.api.health import live
+        return self._json(200, live(self.platform).to_dict())
+
+    def _health_ready(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        from fxars.api.health import ready
+        report = ready(self.platform)
+        return self._json(200 if report.status == "ok" else 503, report.to_dict())
+
+    def _metrics_endpoint(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        self.metrics.set_gauge("fxars_audit_valid", 1.0 if self.platform.audit.verify()["valid"] else 0.0)
+        self.metrics.set_gauge("fxars_killswitch_active", 1.0 if self.platform.killswitch.is_active() else 0.0)
+        self.metrics.set_gauge("fxars_outbox_pending", float(self.platform.outbox.pending_count))
+        text = self.metrics.render_prometheus()
+        return ApiResponse(200, text.encode("utf-8"), content_type="text/plain; version=0.0.4; charset=utf-8")
 
     def _health(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         db_ok = self.platform.db.query_one("SELECT 1 AS ok") is not None
