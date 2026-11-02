@@ -40,6 +40,153 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
+def _rebuild_calibration_report(cal: dict):
+    """Reconstruct a CalibrationReport dataclass from its dict payload.
+
+    Used only for SVG rendering. Returns None if the payload is malformed.
+    """
+    try:
+        from fxars.research.calibration import CalibrationBin, CalibrationReport
+
+        bins = [
+            CalibrationBin(
+                lower=float(b["lower"]),
+                upper=float(b["upper"]),
+                count=int(b["count"]),
+                mean_probability=float(b["mean_probability"]),
+                empirical_frequency=float(b["empirical_frequency"]),
+            )
+            for b in cal.get("bins", [])
+        ]
+        return CalibrationReport(
+            n=int(cal.get("n", 0)),
+            brier=float(cal.get("brier", 0.0)),
+            log_loss=float(cal.get("log_loss", 0.0)),
+            ece=float(cal.get("ece", 0.0)),
+            mce=float(cal.get("mce", 0.0)),
+            n_bins=int(cal.get("n_bins", 10)),
+            bins=bins,
+            temperature=cal.get("temperature"),
+            brier_after=cal.get("after_calibration", {}).get("brier") if cal.get("after_calibration") else None,
+            log_loss_after=cal.get("after_calibration", {}).get("log_loss") if cal.get("after_calibration") else None,
+            ece_after=cal.get("after_calibration", {}).get("ece") if cal.get("after_calibration") else None,
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _calibration_markdown_lines(metrics: dict) -> list[str]:
+    cal = metrics.get("calibration")
+    if not cal:
+        return []
+    lines = [
+        "",
+        "## کالیبراسیون (AC-09)",
+        "| شاخص | مقدار |",
+        "|---|---|",
+        f"| تعداد نمونه | {_fmt(cal.get('n'))} |",
+        f"| ECE | {_fmt(cal.get('ece'))} |",
+        f"| MCE | {_fmt(cal.get('mce'))} |",
+        f"| Brier | {_fmt(cal.get('brier'))} |",
+        f"| LogLoss | {_fmt(cal.get('log_loss'))} |",
+        f"| Temperature (T) | {_fmt(cal.get('temperature'))} |",
+    ]
+    after = cal.get("after_calibration") or {}
+    if after:
+        lines += [
+            "",
+            "**پس از Temperature Scaling:**",
+            f"- ECE: {_fmt(after.get('ece'))}",
+            f"- Brier: {_fmt(after.get('brier'))}",
+            f"- LogLoss: {_fmt(after.get('log_loss'))}",
+        ]
+    bins = cal.get("bins") or []
+    if bins:
+        lines += [
+            "",
+            "### توزیع binها",
+            "| بازه | تعداد | میانگین احتمال | فراوانی تجربی | شکاف |",
+            "|---|---|---|---|---|",
+        ]
+        for item in bins:
+            lines.append(
+                f"| [{item.get('lower'):.2f}, {item.get('upper'):.2f}) "
+                f"| {item.get('count')} "
+                f"| {item.get('mean_probability'):.4f} "
+                f"| {item.get('empirical_frequency'):.4f} "
+                f"| {item.get('gap'):+.4f} |"
+            )
+    ece_value = cal.get("ece")
+    if isinstance(ece_value, (int, float)):
+        lines.append(
+            f"\n> معیار AC-09: ECE < 0.10 برای نمایش احتمال. "
+            f"مقدار فعلی: {'قابل قبول' if ece_value < 0.10 else 'نیازمند بازبینی'}."
+        )
+    return lines
+
+
+def _calibration_html_card(metrics: dict) -> str:
+    cal = metrics.get("calibration")
+    if not cal:
+        return ""
+    report = _rebuild_calibration_report(cal)
+    if report is None:
+        return ""
+    try:
+        from fxars.research.calibration import reliability_diagram_svg
+
+        svg = reliability_diagram_svg(report, width=420, height=380)
+    except Exception:
+        svg = "<p>نمودار کالیبراسیون در دسترس نیست.</p>"
+
+    after = cal.get("after_calibration") or {}
+    after_rows = ""
+    if after:
+        after_rows = (
+            "<h3>پس از Temperature Scaling</h3>"
+            "<table>"
+            f"<tr><th>ECE</th><td>{_fmt(after.get('ece'))}</td></tr>"
+            f"<tr><th>Brier</th><td>{_fmt(after.get('brier'))}</td></tr>"
+            f"<tr><th>LogLoss</th><td>{_fmt(after.get('log_loss'))}</td></tr>"
+            "</table>"
+        )
+
+    bins = cal.get("bins") or []
+    bin_rows = "".join(
+        f"<tr><td>[{item.get('lower'):.2f}, {item.get('upper'):.2f})</td>"
+        f"<td>{item.get('count')}</td>"
+        f"<td>{item.get('mean_probability'):.4f}</td>"
+        f"<td>{item.get('empirical_frequency'):.4f}</td>"
+        f"<td>{item.get('gap'):+.4f}</td></tr>"
+        for item in bins
+    )
+    ece_value = cal.get("ece", 1.0)
+    verdict = "قابل قبول" if isinstance(ece_value, (int, float)) and ece_value < 0.10 else "نیازمند بازبینی"
+    verdict_color = "#22c55e" if verdict == "قابل قبول" else "#f59e0b"
+
+    return (
+        '<div class="card">'
+        "<h2>کالیبراسیون (AC-09)</h2>"
+        "<table>"
+        f"<tr><th>تعداد نمونه</th><td>{_fmt(cal.get('n'))}</td></tr>"
+        f"<tr><th>ECE</th><td>{_fmt(cal.get('ece'))}</td></tr>"
+        f"<tr><th>MCE</th><td>{_fmt(cal.get('mce'))}</td></tr>"
+        f"<tr><th>Brier</th><td>{_fmt(cal.get('brier'))}</td></tr>"
+        f"<tr><th>LogLoss</th><td>{_fmt(cal.get('log_loss'))}</td></tr>"
+        f"<tr><th>Temperature</th><td>{_fmt(cal.get('temperature'))}</td></tr>"
+        f"<tr><th>وضعیت</th><td style='color:{verdict_color}'>{verdict}</td></tr>"
+        "</table>"
+        f"{after_rows}"
+        f"<div style='margin-top:12px'>{svg}</div>"
+        "<h3>توزیع binها</h3>"
+        "<table>"
+        "<tr><th>بازه</th><th>تعداد</th><th>میانگین احتمال</th><th>فراوانی تجربی</th><th>شکاف</th></tr>"
+        f"{bin_rows}"
+        "</table>"
+        "</div>"
+    )
+
+
 def render_markdown(run: BacktestRun) -> str:
     metrics = run.metrics
     lines = [
@@ -65,7 +212,9 @@ def render_markdown(run: BacktestRun) -> str:
             "",
             "## کنترل بیش‌برازش",
             f"- Sharpe: {_fmt(dsr.get('sharpe'))} — SR0: {_fmt(dsr.get('sr0'))} — DSR: {_fmt(dsr.get('dsr'))} — Trials: {_fmt(dsr.get('trials'))}",
+            f"- Annualization factor: {_fmt(dsr.get('periods_per_year'))}",
         ]
+    lines += _calibration_markdown_lines(metrics)
     costs = metrics.get("costs", {})
     lines += [
         "",
@@ -114,6 +263,7 @@ def render_html(run: BacktestRun) -> str:
         for index, trade in enumerate(run.trades[:50], start=1)
     )
     chart = svg_equity_curve([(time, float(value)) for time, value in run.equity_curve])
+    calibration_card = _calibration_html_card(metrics)
     return f"""<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
@@ -121,7 +271,8 @@ def render_html(run: BacktestRun) -> str:
 <title>گزارش بک‌تست {run.instrument_id}</title>
 <style>
  body{{font-family:Tahoma,Segoe UI,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:24px}}
- h1,h2{{color:#7dd3fc}} .card{{background:#111c33;border:1px solid #1e3a5f;border-radius:12px;padding:16px;margin:16px 0}}
+ h1,h2{{color:#7dd3fc}} h3{{color:#93c5fd;font-size:14px;margin:12px 0 6px}}
+ .card{{background:#111c33;border:1px solid #1e3a5f;border-radius:12px;padding:16px;margin:16px 0}}
  table{{width:100%;border-collapse:collapse}} th,td{{border-bottom:1px solid #1e3a5f;padding:6px 8px;text-align:right;font-size:13px}}
  th{{color:#93c5fd;font-weight:600}} .muted{{color:#94a3b8;font-size:12px}}
 </style>
@@ -131,6 +282,7 @@ def render_html(run: BacktestRun) -> str:
 <p class="muted">شناسه: {run.run_id} — بازه: {run.segment.value} — Snapshot: {run.data_snapshot_id} — Config: {run.config_hash}</p>
 <div class="card"><h2>نمودار سرمایه</h2>{chart}</div>
 <div class="card"><h2>معیارهای عملکرد</h2><table>{rows}</table></div>
+{calibration_card}
 <div class="card"><h2>تفکیک هزینه‌ها</h2><table>{cost_rows}</table></div>
 <div class="card"><h2>معاملات</h2><table>
 <tr><th>#</th><th>جهت</th><th>ورود</th><th>خروج</th><th>حجم</th><th>PnL</th><th>R</th><th>دلیل خروج</th></tr>

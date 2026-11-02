@@ -18,6 +18,7 @@ from fxars.data.snapshot import snapshot_id
 from fxars.domain.enums import BacktestSegment, QualityStatus
 from fxars.domain.models import BacktestRun, Candle, Instrument
 from fxars.research.backtest import BacktestConfig, BacktestEngine, BacktestOutput, EvidenceTimeline
+from fxars.research.calibration import calibration_report
 from fxars.research.metrics import compute_metrics, equity_returns
 from fxars.research.overfitting import deflated_sharpe_ratio, probability_of_backtest_overfitting
 from fxars.research.protocol import split_segments, segment_range, ValidationSplit
@@ -44,6 +45,30 @@ class ResearchContext:
     outcome: AnalysisOutcome
     timeline: EvidenceTimeline
     snapshot: str
+
+
+def _build_calibration_metrics(trades: Sequence[dict[str, Any]]) -> dict[str, Any] | None:
+    """P3-3: calibration report from trade outcomes vs. evidence strength.
+
+    ``evidence_strength`` is a proxy for confidence, not a true probability.
+    Documented in DECISIONS.md.
+    """
+    if not trades:
+        return None
+    probs: list[float] = []
+    outcomes: list[int] = []
+    for trade in trades:
+        strength = trade.get("evidence_strength")
+        if strength is None:
+            strength = 0.5
+        probs.append(min(1.0, max(0.0, float(strength))))
+        outcomes.append(1 if float(trade.get("pnl", 0.0)) > 0 else 0)
+    try:
+        report = calibration_report(probs, outcomes, n_bins=10)
+        return report.to_dict()
+    except Exception:
+        # Never break a backtest because of calibration reporting.
+        return None
 
 
 class ResearchService:
@@ -134,16 +159,27 @@ class ResearchService:
         # FIX-05-RESEARCH-CALENDAR: پاس دادن calendar برای parity کامل
         engine = BacktestEngine(context.instrument, timeframe, config, self.settings.analysis,
                                 calendar=getattr(self, "_calendar", None))
-        output = engine.simulate(context.candles, context.timeline, start_index=start, end_index=max(chosen.end, start + 2))
+        output = engine.simulate(context.candles, context.timeline, start_index=start,
+                                 end_index=max(chosen.end, start + 2))
+
         metrics = dict(output.metrics)
+
+        # FIX-P1-4: annualize Sharpe in DSR to match compute_metrics
         from fxars.core.numerics import annualization_factor
         metrics["deflated_sharpe"] = deflated_sharpe_ratio(
             equity_returns(output.equity_curve),
             trials=trials,
             periods_per_year=annualization_factor(timeframe),
         )
+
+        # P3-3: calibration section (AC-09)
+        calibration = _build_calibration_metrics(output.trades)
+        if calibration is not None:
+            metrics["calibration"] = calibration
+
         metrics["stats"] = output.stats
         metrics["segment"] = segment.value
+
         run_id = stable_id(
             "bt", instrument_id, timeframe, config.hash(), context.snapshot, segment.value,
             self.settings.code_version, length=24,
@@ -174,6 +210,7 @@ class ResearchService:
                         "instrument_id": instrument_id, "timeframe": timeframe, "segment": segment.value,
                         "trade_count": metrics.get("trade_count"), "net_profit": metrics.get("net_profit"),
                         "config_hash": run.config_hash, "data_snapshot_id": context.snapshot,
+                        "calibration_ece": (calibration or {}).get("ece"),
                     },
                 )
                 self.outbox.emit(
