@@ -172,6 +172,26 @@ class ResearchService:
             periods_per_year=annualization_factor(timeframe),
         )
 
+        # P3-4: regime detection and per-regime trade attribution
+        try:
+            from fxars.research.regime import classify_regimes, regime_breakdown
+            _regime_labels = classify_regimes(context.candles)
+            _entry_indices = []
+            _pnls = []
+            for _t in output.trades:
+                _et = _t.get("entry_time")
+                if not _et:
+                    continue
+                from fxars.core.timeutil import parse_ts as _parse
+                _dt = _parse(_et)
+                _idx = next((j for j, c in enumerate(context.candles) if c.open_time == _dt), None)
+                if _idx is None:
+                    continue
+                _entry_indices.append(_idx)
+                _pnls.append(float(_t.get("pnl", 0.0)))
+            metrics["regime_breakdown"] = regime_breakdown(_regime_labels, _entry_indices, _pnls)
+        except Exception:
+            pass
         # P3-3: calibration section (AC-09)
         calibration = _build_calibration_metrics(output.trades)
         if calibration is not None:

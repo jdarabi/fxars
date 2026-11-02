@@ -75,6 +75,57 @@ def _rebuild_calibration_report(cal: dict):
         return None
 
 
+def _regime_markdown_lines(metrics: dict) -> list[str]:
+    rb = metrics.get("regime_breakdown")
+    if not rb:
+        return []
+    lines = ["", "## تفکیک عملکرد بر اساس رژیم بازار",
+             "| رژیم | تعداد | نرخ برد | میانگین PnL | مجموع PnL |",
+             "|---|---|---|---|---|"]
+    for regime, data in sorted(rb.items()):
+        count = data.get("count", 0)
+        if count == 0:
+            continue
+        win_rate = data.get("win_rate")
+        avg_pnl = data.get("avg_pnl")
+        total_pnl = data.get("total_pnl", 0.0)
+        lines.append(
+            "| {} | {} | {} | {} | {} |".format(
+                regime, count,
+                _fmt(win_rate), _fmt(avg_pnl), _fmt(total_pnl),
+            )
+        )
+    return lines
+
+
+def _regime_html_card(metrics: dict) -> str:
+    rb = metrics.get("regime_breakdown")
+    if not rb:
+        return ""
+    rows = ""
+    for regime, data in sorted(rb.items()):
+        count = data.get("count", 0)
+        if count == 0:
+            continue
+        rows += (
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+                regime, count,
+                _fmt(data.get("win_rate")),
+                _fmt(data.get("avg_pnl")),
+                _fmt(data.get("total_pnl")),
+            )
+        )
+    if not rows:
+        return ""
+    return (
+        "<div class=\"card\"><h2>تفکیک عملکرد بر اساس رژیم بازار</h2>"
+        "<table>"
+        "<tr><th>رژیم</th><th>تعداد</th><th>نرخ برد</th><th>میانگین PnL</th><th>مجموع PnL</th></tr>"
+        + rows +
+        "</table></div>"
+    )
+
+
 def _calibration_markdown_lines(metrics: dict) -> list[str]:
     cal = metrics.get("calibration")
     if not cal:
@@ -215,6 +266,7 @@ def render_markdown(run: BacktestRun) -> str:
             f"- Annualization factor: {_fmt(dsr.get('periods_per_year'))}",
         ]
     lines += _calibration_markdown_lines(metrics)
+    lines += _regime_markdown_lines(metrics)
     costs = metrics.get("costs", {})
     lines += [
         "",
@@ -264,6 +316,7 @@ def render_html(run: BacktestRun) -> str:
     )
     chart = svg_equity_curve([(time, float(value)) for time, value in run.equity_curve])
     calibration_card = _calibration_html_card(metrics)
+    regime_card = _regime_html_card(metrics)
     return f"""<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
@@ -283,6 +336,7 @@ def render_html(run: BacktestRun) -> str:
 <div class="card"><h2>نمودار سرمایه</h2>{chart}</div>
 <div class="card"><h2>معیارهای عملکرد</h2><table>{rows}</table></div>
 {calibration_card}
+{regime_card}
 <div class="card"><h2>تفکیک هزینه‌ها</h2><table>{cost_rows}</table></div>
 <div class="card"><h2>معاملات</h2><table>
 <tr><th>#</th><th>جهت</th><th>ورود</th><th>خروج</th><th>حجم</th><th>PnL</th><th>R</th><th>دلیل خروج</th></tr>
