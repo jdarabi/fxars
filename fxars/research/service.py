@@ -75,8 +75,12 @@ class ResearchService:
     # ------------------------------------------------------------------ آماده‌سازی
     def prepare(self, instrument_id: str, timeframe: str, *, as_of: datetime | None = None) -> ResearchContext:
         instrument = self.instruments.get(instrument_id)
+        # PRIMARY_SOURCE_RESEARCH: انتخاب منبع اصلی برای بک‌تست
+        primary_source = self.instruments.primary_source(instrument_id, timeframe)
         candles = [
-            candle for candle in self.candles.range(instrument_id, timeframe, as_of=as_of, closed_only=True)
+            candle for candle in self.candles.range(
+                instrument_id, timeframe, source_id=primary_source, as_of=as_of, closed_only=True,
+            )
             if candle.quality_status is not QualityStatus.INVALID
         ]
         if len(candles) < self.settings.analysis.min_bars + 20:
@@ -127,7 +131,9 @@ class ResearchService:
         )
         chosen = segment_range(split, segment)
         start = max(chosen.start, self.settings.analysis.min_bars)
-        engine = BacktestEngine(context.instrument, timeframe, config, self.settings.analysis)
+        # FIX-05-RESEARCH-CALENDAR: پاس دادن calendar برای parity کامل
+        engine = BacktestEngine(context.instrument, timeframe, config, self.settings.analysis,
+                                calendar=getattr(self, "_calendar", None))
         output = engine.simulate(context.candles, context.timeline, start_index=start, end_index=max(chosen.end, start + 2))
         metrics = dict(output.metrics)
         metrics["deflated_sharpe"] = deflated_sharpe_ratio(

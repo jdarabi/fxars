@@ -54,6 +54,7 @@ CHECK_TO_REASON: dict[str, RiskReasonCode] = {
     "spread_within_limit": RiskReasonCode.SPREAD_LIMIT,
     "margin_sufficient": RiskReasonCode.MARGIN_INSUFFICIENT,
     "validity_window_ok": RiskReasonCode.SCENARIO_EXPIRED,
+    "entry_deviation_ok": RiskReasonCode.PRICE_INVALID,
 }
 
 
@@ -112,10 +113,14 @@ class RiskGate:
             and instrument.pip_size > ZERO and instrument.lot_step > ZERO,
             "مشخصات قراردادی نماد معتبر و در تاریخ اعتبار است.",
             instrument.instrument_id if instrument else None)
-        add("account_snapshot_fresh",
-            account is not None and (now - account.taken_at).total_seconds() <= policy.max_account_age_seconds,
-            "تصویر حساب تازه است.",
-            None if account is None else round((now - account.taken_at).total_seconds(), 1), policy.max_account_age_seconds)
+        # FIX-06-RISK-FAIL-CLOSED: حساب آینده یا خارج از TTL ⇒ Fail
+        account_age: float | None = None
+        if account is not None:
+            account_age = (now - account.taken_at).total_seconds()
+        account_fresh = (account_age is not None and -5.0 <= account_age <= policy.max_account_age_seconds)
+        add("account_snapshot_fresh", account_fresh,
+            "تصویر حساب تازه است." if account_fresh else "تصویر حساب تازه نیست یا در آینده است.",
+            None if account_age is None else round(account_age, 1), policy.max_account_age_seconds)
 
         stale = True
         if candle is not None:
@@ -134,8 +139,10 @@ class RiskGate:
         spread_pips: Decimal | None = None
         if candle is not None and candle.spread is not None and instrument is not None:
             spread_pips = candle.spread / instrument.pip_size
-        add("spread_within_limit", spread_pips is None or spread_pips <= policy.max_spread_pips,
-            "اسپرد در محدوده مجاز است." if spread_pips is not None else "اسپرد در داده موجود نیست؛ بدون تخمین پذیرفته شد.",
+        # FIX-06: نبود اسپرد ⇒ Fail
+        spread_ok = spread_pips is not None and spread_pips <= policy.max_spread_pips
+        add("spread_within_limit", spread_ok,
+            "اسپرد در محدوده مجاز است." if spread_ok else "اسپرد ناموجود یا خارج از سقف؛ تأیید نمی‌شود.",
             None if spread_pips is None else quantize(spread_pips, 2), policy.max_spread_pips)
 
         sizing: SizingResult | None = None
@@ -186,14 +193,19 @@ class RiskGate:
             {"open": None if account is None else account.open_positions, "symbol": same_symbol},
             {"max_open": policy.max_open_positions, "max_per_symbol": policy.max_positions_per_symbol})
 
-        exposure_ok = True
+        # FIX-06: عدم امکان محاسبه مواجهه ⇒ Fail
         exposures: dict[str, Decimal] = {}
-        if account is not None and instrument is not None and sizing is not None and sizing.volume > ZERO:
+        can_compute = (account is not None and instrument is not None
+                       and sizing is not None and sizing.volume > ZERO)
+        if can_compute:
             exposure_ok, exposures = exposure_tools.combined_currency_ok(
                 positions, context.instruments, context.rates, instrument, sizing.volume, entry, side,
                 account.equity * policy.max_currency_exposure,
             )
-        add("currency_exposure_ok", exposure_ok, "مواجهه خالص ارزها در سقف مجاز است.",
+        else:
+            exposure_ok = False
+        add("currency_exposure_ok", exposure_ok,
+            "مواجهه خالص ارزها در سقف مجاز است." if exposure_ok else "محاسبه مواجهه ارزی ممکن یا در محدوده نیست.",
             {key: str(quantize(value, 2)) for key, value in exposures.items()},
             None if account is None else account.equity * policy.max_currency_exposure)
 
@@ -238,6 +250,17 @@ class RiskGate:
 
         add("validity_window_ok", now < scenario.expiry_at, "سناریو منقضی نشده است.",
             scenario.expiry_at.isoformat(), now.isoformat())
+
+        # FIX-06: کنترل انحراف قیمت از Entry
+        entry_dev_ok = False
+        entry_dev_pips: float | None = None
+        if candle is not None and instrument is not None and entry > ZERO:
+            dev_pips = abs(candle.close - entry) / instrument.pip_size
+            entry_dev_pips = float(dev_pips)
+            entry_dev_ok = dev_pips <= Decimal("25")
+        add("entry_deviation_ok", entry_dev_ok,
+            "قیمت جاری نزدیک سطح ورود است." if entry_dev_ok else "قیمت از سطح ورود فاصله زیادی دارد.",
+            entry_dev_pips, "25 pip")
 
         failed = [check for check in checks if not check.passed]
         approved = not failed

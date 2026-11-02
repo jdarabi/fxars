@@ -151,6 +151,14 @@ class ApiApp:
             except FxarsError as exc:
                 exc.correlation_id = exc.correlation_id or current_correlation_id()
                 return self._json(exc.http_status, exc.to_dict())
+            except (ValueError, TypeError, KeyError) as exc:
+                # FIX-07-API-VALIDATION
+                error = ValidationError(
+                    f"ورودی نامعتبر است: {exc}",
+                    correlation_id=current_correlation_id(),
+                    details={"path": request.path, "type": type(exc).__name__},
+                )
+                return self._json(error.http_status, error.to_dict())
             except Exception:
                 logger.exception("unhandled api error", extra={"data": {"path": request.path}})
                 from fxars.core.errors import FxarsError as Base
@@ -359,20 +367,64 @@ class ApiApp:
         return self._json(200, {"items": items, "count": len(items)})
 
     def _candles(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        # FIX-12-CANDLES-PAGINATION
         instrument_id = request.one("instrument_id")
         timeframe = request.one("timeframe", "H1")
         if not instrument_id:
             raise ValidationError("پارامتر instrument_id الزامی است.")
-        start = parse_ts(request.one("start")) if request.one("start") else None
-        end = parse_ts(request.one("end")) if request.one("end") else None
-        limit, _ = self._page(request)
-        candles = self.platform.candles.range(instrument_id, timeframe, start=start, end=end, limit=None)
-        selected = candles[-limit:]
+        try:
+            from fxars.domain.enums import Timeframe as _TF
+            _TF.parse(timeframe)
+        except ValueError:
+            raise ValidationError(f"timeframe نامعتبر است: {timeframe!r}") from None
+
+        source_id = request.one("source_id")
+        if not source_id:
+            try:
+                source_id = self.platform.instruments.primary_source(instrument_id, timeframe)
+            except Exception:
+                source_id = None
+
+        start = None
+        if request.one("start"):
+            try:
+                start = parse_ts(request.one("start"))
+            except ValueError as exc:
+                raise ValidationError(f"start نامعتبر است: {exc}") from None
+        end = None
+        if request.one("end"):
+            try:
+                end = parse_ts(request.one("end"))
+            except ValueError as exc:
+                raise ValidationError(f"end نامعتبر است: {exc}") from None
+
+        limit, offset = self._page(request)
+        limit = min(limit, 5000)
+
+        candles = self.platform.candles.range(
+            instrument_id, timeframe, source_id=source_id,
+            start=start, end=end, closed_only=True,
+        )
+        total = len(candles)
+        order = (request.one("order") or "desc").lower()
+        if order == "asc":
+            start_index = min(offset, total)
+            end_index = min(offset + limit, total)
+            selected = candles[start_index:end_index]
+        else:
+            end_index = max(0, total - offset)
+            start_index = max(0, end_index - limit)
+            selected = candles[start_index:end_index]
         return self._json(200, {
             "instrument_id": instrument_id,
             "timeframe": timeframe,
+            "source_id": source_id,
             "count": len(selected),
-            "total": len(candles),
+            "total": total,
+            "order": order,
+            "order": order,
+            "limit": limit,
+            "offset": offset,
             "items": [candle.to_dict() for candle in selected],
         })
 
@@ -389,10 +441,24 @@ class ApiApp:
     def _analysis_create(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         body = request.json()
         instrument_id = body.get("instrument_id")
-        timeframe = body.get("timeframe", "H1")
+        timeframe = str(body.get("timeframe", "H1")).upper()
         if not instrument_id:
             raise ValidationError("instrument_id الزامی است.")
-        as_of = parse_ts(body["as_of"]) if body.get("as_of") else None
+        # FIX-07-API-VALIDATION
+        from fxars.domain.enums import Timeframe as _TF
+        try:
+            _TF.parse(timeframe)
+        except ValueError:
+            raise ValidationError(
+                f"timeframe نامعتبر است: {timeframe!r}",
+                details={"allowed": [t.value for t in _TF]},
+            ) from None
+        as_of = None
+        if body.get("as_of"):
+            try:
+                as_of = parse_ts(body["as_of"])
+            except ValueError as exc:
+                raise ValidationError(f"as_of نامعتبر است: {exc}") from None
         result = self.platform.run_analysis(instrument_id, timeframe, as_of=as_of, actor=user.username)
         return self._json(200, {
             "run": result.run.to_dict(),
@@ -488,7 +554,13 @@ class ApiApp:
         timeframe = body.get("timeframe", "H1")
         if not instrument_id:
             raise ValidationError("instrument_id الزامی است.")
-        segment = BacktestSegment(str(body.get("segment", "ALL")).upper())
+        try:
+            segment = BacktestSegment(str(body.get("segment", "ALL")).upper())
+        except ValueError:
+            raise ValidationError(
+                f"segment نامعتبر است: {body.get('segment')!r}",
+                details={"allowed": [s.value for s in BacktestSegment]},
+            ) from None
         as_of = parse_ts(body["as_of"]) if body.get("as_of") else None
         result = self.platform.research.run(
             instrument_id, timeframe, config_overrides=body.get("overrides") or {},

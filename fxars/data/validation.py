@@ -82,6 +82,12 @@ class CandleValidator:
         if not candle.is_closed:
             soft.append("unclosed_bar")
             reasons.append("کندل بسته نشده است.")
+        if candle.is_closed and candle.available_at < candle.close_time:
+            soft.append("available_at_before_close")
+            reasons.append("candle marked closed but available_at precedes close_time")
+        if candle.is_closed and candle.available_at < candle.close_time:
+            soft.append("available_at_before_close")
+            reasons.append("candle marked closed but available_at precedes close_time")
         if self.now is not None:
             if candle.available_at > self.now + timedelta(minutes=5):
                 soft.append("future_available_at")

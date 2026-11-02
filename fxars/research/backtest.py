@@ -46,6 +46,10 @@ class BacktestConfig:
     min_signal_strength: float = 0.30
     quote_rates: dict[str, Decimal] = field(default_factory=lambda: {"JPY": Decimal("0.0067")})
     seed: int = 7
+    # FIX-05-BACKTEST-PARITY:
+    #   "scenario" = منطق دقیقاً هم‌خوان با ScenarioBuilder/TriggerEvaluator
+    #   "baseline" = منطق ساده قبلی (stop از کف/سقف ۲۰ کندل + ورود در open)
+    mode: str = "scenario"
 
     def __post_init__(self) -> None:
         for name in ("initial_equity", "risk_per_trade", "spread_pips", "slippage_pips",
@@ -53,6 +57,8 @@ class BacktestConfig:
             object.__setattr__(self, name, _d(getattr(self, name)))
         object.__setattr__(self, "target_r_multiples", tuple(_d(item) for item in self.target_r_multiples))
         object.__setattr__(self, "quote_rates", {key: _d(value) for key, value in self.quote_rates.items()})
+        if self.mode not in ("scenario", "baseline"):
+            raise ValueError(f"mode نامعتبر: {self.mode!r} (allowed: scenario, baseline)")
         if self.initial_equity <= 0 or not (0 < self.risk_per_trade <= Decimal("0.05")):
             raise ValueError("پارامترهای سرمایه/ریسک بک‌تست نامعتبرند.")
 
@@ -146,7 +152,8 @@ class BacktestOutput:
 
 
 class BacktestEngine:
-    def __init__(self, instrument: Instrument, timeframe: str, config: BacktestConfig, analysis: AnalysisSettings) -> None:
+    def __init__(self, instrument: Instrument, timeframe: str, config: BacktestConfig, analysis: AnalysisSettings,
+                 *, calendar=None) -> None:
         self.instrument = instrument
         self.timeframe = timeframe
         self.config = config
@@ -154,6 +161,15 @@ class BacktestEngine:
         self._pip = instrument.pip_size
         self._contract = instrument.contract_size
         self._quant = Decimal(1).scaleb(-instrument.digits)
+        # FIX-05-BACKTEST-PARITY: builder/evaluator برای حالت scenario
+        from fxars.decision.scenario import ScenarioBuilder
+        from fxars.decision.trigger import TriggerEvaluator
+        if calendar is not None:
+            self._scenario_builder = ScenarioBuilder(analysis, calendar)
+            self._trigger_evaluator = TriggerEvaluator(analysis, calendar)
+        else:
+            self._scenario_builder = ScenarioBuilder(analysis)
+            self._trigger_evaluator = TriggerEvaluator(analysis)
 
     def simulate(
         self,
@@ -173,17 +189,45 @@ class BacktestEngine:
         trades: list[dict[str, Any]] = []
         position: _OpenTrade | None = None
         pending: dict[str, Any] | None = None
-        stats = {"bars": 0, "decisions": 0, "entries": 0, "skipped": 0, "no_trade": 0, "stops": 0, "targets": 0}
+        stats = {"bars": 0, "decisions": 0, "entries": 0, "skipped": 0, "no_trade": 0,
+                 "stops": 0, "targets": 0, "pending_expired": 0, "pending_invalidated": 0}
 
         for index in range(start_index, end_index):
             candle = candles[index]
             stats["bars"] += 1
 
-            if position is None and pending is not None and pending["created_index"] == index - 1:
-                position = self._enter(pending, candle, equity)
-                pending = None
-                if position is not None:
-                    stats["entries"] += 1
+            if position is None and pending is not None:
+                mode = pending.get("mode", "baseline")
+                if mode == "scenario":
+                    pending_expiry = pending.get("expiry_at")
+                    if pending_expiry is not None and candle.open_time >= pending_expiry:
+                        pending = None
+                        stats["pending_expired"] += 1
+                    else:
+                        stop = pending.get("stop")
+                        direction = pending.get("direction")
+                        invalidated = False
+                        if stop is not None and direction is not None:
+                            if direction is Direction.LONG and candle.close <= stop:
+                                invalidated = True
+                            elif direction is Direction.SHORT and candle.close >= stop:
+                                invalidated = True
+                        if invalidated:
+                            pending = None
+                            stats["pending_invalidated"] += 1
+                        elif index > pending["created_index"]:
+                            position = self._enter(pending, candle, equity)
+                            if position is not None:
+                                pending = None
+                                stats["entries"] += 1
+                else:
+                    if pending["created_index"] == index - 1:
+                        position = self._enter(pending, candle, equity)
+                        pending = None
+                        if position is not None:
+                            stats["entries"] += 1
+                    elif pending["created_index"] < index - 1:
+                        pending = None
 
             if position is not None:
                 position.bars_held += 1
@@ -202,7 +246,10 @@ class BacktestEngine:
                 elif decision.strength < self.config.min_signal_strength:
                     stats["skipped"] += 1
                 else:
-                    pending = self._plan(decision, candles, index)
+                    if self.config.mode == "scenario":
+                        pending = self._plan_from_scenario(decision, candles, index, timeline)
+                    else:
+                        pending = self._plan(decision, candles, index)
 
             unrealized = self._mark_to_market(position, candle.close) if position is not None else ZERO
             equity_curve.append((format_ts(candle.open_time), float(equity + unrealized)))
@@ -226,6 +273,7 @@ class BacktestEngine:
         return aggregate_evidence(evidences, self.analysis, as_of=candle.available_at, timeframe=self.timeframe)
 
     def _plan(self, decision: Decision, candles: Sequence[Candle], index: int) -> dict[str, Any]:
+        # Baseline: stop از کف/سقف ۲۰ کندل + بافر
         window = 20
         start = max(0, index - window + 1)
         if decision.direction is Direction.LONG:
@@ -239,7 +287,56 @@ class BacktestEngine:
             "created_index": index,
             "stop": stop.quantize(self._quant),
             "decision_strength": decision.strength,
+            "mode": "baseline",
         }
+
+    def _plan_from_scenario(self, decision: Decision, candles: Sequence[Candle], index: int,
+                            timeline: EvidenceTimeline) -> dict[str, Any] | None:
+        # FIX-05-BACKTEST-PARITY: استفاده از همان ScenarioBuilder زنده
+        try:
+            from fxars.analysis.engine import AnalysisOutcome
+            from fxars.analysis.context import IndicatorSet
+            window = candles[max(0, index - 600): index + 1]
+            indicators = IndicatorSet.build(window, self.analysis)
+            # ساخت StructureResult حداقلی برای builder
+            from fxars.analysis.structure import StructureResult, Swing
+            structure = StructureResult()
+            if window:
+                highs = max(window[-20:], key=lambda c: c.high)
+                lows = min(window[-20:], key=lambda c: c.low)
+                structure.last_swing_high = Swing(index=0, price=highs.high, kind="HIGH", confirmed_index=0)
+                structure.last_swing_low = Swing(index=0, price=lows.low, kind="LOW", confirmed_index=0)
+            outcome = AnalysisOutcome(
+                instrument=self.instrument, timeframe=self.timeframe,
+                as_of=candles[index].available_at, candles=list(window),
+                indicators=indicators, structure=structure,
+                evidences=[], summary={}, snapshot_id="bt_inline",
+                config_hash=self.config.hash(),
+            )
+            built = self._scenario_builder.build(
+                outcome, decision, run_id="bt_parity", rules_version="rules_v1.3.0",
+            )
+            if built.scenario is None:
+                return None
+            sc = built.scenario
+            entry_level = Decimal(sc.entry_condition.get("level", "0"))
+            stop_level = Decimal(sc.stop_logic.get("level", "0"))
+            return {
+                "direction": decision.direction,
+                "created_index": index,
+                "stop": stop_level.quantize(self._quant),
+                "entry_trigger": entry_level.quantize(self._quant),
+                "targets": list(sc.target_logic),
+                "expiry_at": sc.expiry_at,
+                "decision_strength": decision.strength,
+                "mode": "scenario",
+            }
+        except Exception as exc:
+            # Fail-safe: در صورت خطا، به baseline برمی‌گردیم
+            fallback = self._plan(decision, candles, index)
+            fallback["mode"] = "baseline_fallback"
+            fallback["fallback_error"] = type(exc).__name__
+            return fallback
 
     # ------------------------------------------------------------------ ورود
     def _enter(self, plan: dict[str, Any], candle: Candle, equity: Decimal) -> _OpenTrade | None:
@@ -247,10 +344,22 @@ class BacktestEngine:
         spread = candle.spread if candle.spread is not None else self.config.spread_pips * self._pip
         half = spread / Decimal("2")
         slip = self.config.slippage_pips * self._pip
-        if direction is Direction.LONG:
-            entry = candle.open + half + slip
+        entry_trigger = plan.get("entry_trigger")
+        if plan.get("mode") == "scenario" and entry_trigger is not None:
+            # ورود در Trigger Level اگر در دامنه کندل لمس شده باشد
+            if direction is Direction.LONG:
+                if candle.high < entry_trigger:
+                    return None
+                entry = max(candle.open, entry_trigger) + half + slip
+            else:
+                if candle.low > entry_trigger:
+                    return None
+                entry = min(candle.open, entry_trigger) - half - slip
         else:
-            entry = candle.open - half - slip
+            if direction is Direction.LONG:
+                entry = candle.open + half + slip
+            else:
+                entry = candle.open - half - slip
         entry = entry.quantize(self._quant)
         stop = plan["stop"]
         distance = abs(entry - stop)
@@ -389,3 +498,5 @@ class BacktestEngine:
 def default_backtest_config(settings: BacktestSettings, *, min_signal_strength: float = 0.30,
                             overrides: dict[str, Any] | None = None) -> BacktestConfig:
     return BacktestConfig.from_settings(settings, overrides=overrides, min_signal_strength=min_signal_strength)
+
+# FIX-05-ENGINE-DONE

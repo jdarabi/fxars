@@ -100,7 +100,10 @@ class IdentityService:
         from dataclasses import replace
 
         self.users.save(replace(user, password_hash=encoded))
-        self.sessions.revoke_all(user_id) if hasattr(self.sessions, "revoke_all") else None
+        try:
+            self.sessions.revoke_all(user_id)
+        except AttributeError:
+            pass
         self.audit.append("USER_PASSWORD_CHANGED", "user", user_id, actor=actor, payload={})
 
     def list_users(self) -> list[User]:

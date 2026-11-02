@@ -336,6 +336,16 @@ class EconomicEvent:
             value = getattr(self, name)
             if value is not None:
                 object.__setattr__(self, name, to_decimal(value, field=name))
+        # FIX-P0-2: bitemporal invariants
+        if self.available_at < self.event_time:
+            raise ValueError("available_at cannot precede event_time")
+        if self.published_at is not None and self.available_at < self.published_at:
+            raise ValueError("available_at cannot precede published_at")
+        # FIX-P0-2: bitemporal invariants
+        if self.available_at < self.event_time:
+            raise ValueError("available_at cannot precede event_time")
+        if self.published_at is not None and self.available_at < self.published_at:
+            raise ValueError("available_at cannot precede published_at")
 
     @property
     def surprise(self) -> Decimal | None:

@@ -112,9 +112,30 @@ class ExecutionService:
     def submit(self, intent_id: str, *, price: Decimal, pip_size: Decimal, actor: str = "system") -> OrderIntent:
         if self.phase is Phase.READ_ONLY:
             raise PhaseViolationError("ارسال سفارش در فاز Read-only ممنوع است.")
+        self.killswitch.assert_inactive()
+        self.killswitch.assert_inactive()
+        self.killswitch.assert_inactive()
         intent = self.orders.get_intent(intent_id)
         if intent is None:
             raise ValidationError("OrderIntent یافت نشد.")
+        decision = self.decisions.get(intent.risk_decision_id)
+        now = self.clock()
+        if not decision.approved or decision.valid_until <= now:
+            raise RiskRejectedError(
+                "RiskDecision expired or rejected at submission time.",
+                details={"decision_id": decision.decision_id,
+                         "reason": decision.reason_code.value,
+                         "valid_until": decision.valid_until.isoformat()},
+            )
+        decision = self.decisions.get(intent.risk_decision_id)
+        now = self.clock()
+        if not decision.approved or decision.valid_until <= now:
+            raise RiskRejectedError(
+                "RiskDecision expired or rejected at submission time.",
+                details={"decision_id": decision.decision_id,
+                         "reason": decision.reason_code.value,
+                         "valid_until": decision.valid_until.isoformat()},
+            )
         if self.broker is None:
             raise ValidationError("آداپتر بروکر پیکربندی نشده است.")
         intent = transition(intent, OrderStatus.SUBMITTED)
