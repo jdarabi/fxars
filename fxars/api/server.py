@@ -609,8 +609,20 @@ class _Handler(BaseHTTPRequestHandler):
     def _handle(self, method: str) -> None:
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length") or 0)
-        if length > self.server.app.settings.api.max_body_bytes:  # type: ignore[attr-defined]
-            self._send(ApiResponse(413, b'{"error":{"code":"PAYLOAD_TOO_LARGE","message":"Request body too large."}}'))
+        max_bytes = self.server.app.settings.api.max_body_bytes  # type: ignore[attr-defined]
+        if length > max_bytes:
+            # FIX-P2-3: drain body so client can finish sending and read the 413 response
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+            self._send(ApiResponse(
+                413,
+                b'{"error":{"code":"PAYLOAD_TOO_LARGE","message":"Request body too large.","correlation_id":"","details":{}}}',
+                headers={"Connection": "close"},
+            ))
             return
         body = self.rfile.read(length) if length else b""
         request = ApiRequest(
