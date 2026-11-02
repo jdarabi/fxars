@@ -1,4 +1,4 @@
-"""زمان: همه محاسبات داخلی UTC، تبدیل فقط در لایه نمایش."""
+"""زمان: همه محاسبات داخلی UTC تبدیل فقط در لایه نمایش."""
 
 from __future__ import annotations
 
@@ -21,12 +21,11 @@ TIMEFRAME_MINUTES: Final[dict[str, int]] = {
 
 _ISO_RE = re.compile(
     r"^(?P<date>\d{4}-\d{2}-\d{2})[T ](?P<time>\d{2}:\d{2}(?::\d{2})?)(?:\.(?P<frac>\d{1,6}))?"
-    r"(?P<tz>Z|[+-]\d{2}:?\d{2})?$"
+    r"(?P<tz>Z|[+-]\d{2}:?\d{2})?\$"
 )
 
 
 def utcnow() -> datetime:
-    """زمان جاری UTC (با ثانیه دقیق برای پایداری خروجی‌ها)."""
     return datetime.now(tz=UTC).replace(microsecond=0)
 
 
@@ -37,7 +36,6 @@ def ensure_utc(value: datetime) -> datetime:
 
 
 def parse_ts(value: str | datetime) -> datetime:
-    """تجزیه ISO-8601 با پشتیبانی Z؛ زمان بدون منطقه به‌عنوان UTC تلقی می‌شود."""
     if isinstance(value, datetime):
         return ensure_utc(value)
     text = value.strip()
@@ -57,7 +55,6 @@ def parse_ts(value: str | datetime) -> datetime:
 
 
 def format_ts(value: datetime) -> str:
-    """قالب قراردادی: YYYY-MM-DDTHH:MM:SSZ"""
     dt = ensure_utc(value)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -66,26 +63,39 @@ def timeframe_delta(timeframe: str) -> timedelta:
     try:
         return timedelta(minutes=TIMEFRAME_MINUTES[timeframe])
     except KeyError:
-        raise ValueError(f"timeframe پشتیبانی‌نشده: {timeframe!r}") from None
+        raise ValueError(f"timeframe پشتیبانینشده: {timeframe!r}") from None
 
 
 def floor_to_timeframe(value: datetime, timeframe: str) -> datetime:
-    """گرد کردن زمان شروع کندل به شبکه زمانی (UTC)."""
     dt = ensure_utc(value)
     minutes = TIMEFRAME_MINUTES[timeframe]
+
     if minutes >= 1440:
         if minutes == 10080:
-            monday = dt - timedelta(days=dt.weekday())
-            return monday.replace(hour=0, minute=0, second=0, microsecond=0)
-        return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            days_since_monday = dt.weekday()
+            monday_date = (dt - timedelta(days=days_since_monday)).date()
+            return datetime(
+                year=monday_date.year, month=monday_date.month, day=monday_date.day,
+                hour=0, minute=0, second=0, microsecond=0,
+                tzinfo=dt.tzinfo, fold=dt.fold,
+            )
+        return datetime(
+            year=dt.year, month=dt.month, day=dt.day,
+            hour=0, minute=0, second=0, microsecond=0,
+            tzinfo=dt.tzinfo, fold=dt.fold,
+        )
+
     total = dt.hour * 60 + dt.minute
     floored = total - (total % minutes)
-    return dt.replace(hour=floored // 60, minute=floored % 60, second=0, microsecond=0)
+    return datetime(
+        year=dt.year, month=dt.month, day=dt.day,
+        hour=floored // 60, minute=floored % 60, second=0, microsecond=0,
+        tzinfo=dt.tzinfo, fold=dt.fold,
+    )
 
 
 def to_local(value: datetime, tz_name: str) -> datetime:
     from zoneinfo import ZoneInfo
-
     return ensure_utc(value).astimezone(ZoneInfo(tz_name))
 
 

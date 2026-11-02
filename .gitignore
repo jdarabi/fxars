@@ -1,4 +1,4 @@
-__pycache__/
+﻿__pycache__/
 *.py[cod]
 *.egg-info/
 build/
@@ -13,3 +13,15 @@ data/tmp_tests/
 reports/
 .coverage
 .pytest_cache/
+
+# Backups and temp files
+*.bak
+*.bak.*
+.fix-backups/
+*.log
+apply-p0-p1-fixes.ps1
+
+# Ignore generated test artifacts
+p0p1-tests.log
+full-suite.log
+test_results.log
