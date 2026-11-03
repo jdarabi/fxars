@@ -123,5 +123,7 @@ jobs:
         run: python -m fxars backtest --instrument EURUSD --timeframe H1
       - name: Audit verify
         run: python -m fxars audit verify
+      - name: Regime benchmark
+        run: python scripts/benchmark_regime.py
       - name: Smoke regime filter
         run: python scripts/smoke_regime_filter.py
