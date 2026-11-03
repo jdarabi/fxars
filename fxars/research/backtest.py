@@ -184,6 +184,9 @@ class BacktestEngine:
         self._pip = instrument.pip_size
         self._contract = instrument.contract_size
         self._quant = Decimal(1).scaleb(-instrument.digits)
+        # FIX-06-SWAP: مدت هر کندل به دقیقه، برای محاسبه دقیق Swap
+        from fxars.domain.enums import Timeframe as _TF
+        self._tf_minutes = _TF.parse(timeframe).minutes
         # FIX-05-BACKTEST-PARITY: builder/evaluator برای حالت scenario
         from fxars.decision.scenario import ScenarioBuilder
         from fxars.decision.trigger import TriggerEvaluator
@@ -193,6 +196,9 @@ class BacktestEngine:
         else:
             self._scenario_builder = ScenarioBuilder(analysis)
             self._trigger_evaluator = TriggerEvaluator(analysis)
+        # FIX-06-FALLBACK-TRANSPARENT: شمارنده fallback
+        self._fallback_count = 0
+        self._fallback_errors: dict[str, int] = {}
 
     def simulate(
         self,
@@ -320,6 +326,9 @@ class BacktestEngine:
             trades.append(trade)
             equity_curve[-1] = (format_ts(last.open_time), float(equity))
 
+        # FIX-06-FALLBACK-TRANSPARENT: انتقال شمارنده fallback به stats خروجی
+        stats["fallback_count"] = self._fallback_count
+        stats["fallback_errors"] = dict(self._fallback_errors)
         metrics = compute_metrics(
             trades, equity_curve,
             initial_equity=float(self.config.initial_equity),
@@ -410,10 +419,13 @@ class BacktestEngine:
                 "mode": "scenario",
             }
         except Exception as exc:
-            # Fail-safe: در صورت خطا، به baseline برمی‌گردیم
+            # FIX-06-FALLBACK-TRANSPARENT: ثبت علت fallback در stats
+            err_name = type(exc).__name__
+            self._fallback_count += 1
+            self._fallback_errors[err_name] = self._fallback_errors.get(err_name, 0) + 1
             fallback = self._plan(decision, candles, index)
             fallback["mode"] = "baseline_fallback"
-            fallback["fallback_error"] = type(exc).__name__
+            fallback["fallback_error"] = err_name
             return fallback
 
     # ------------------------------------------------------------------ ورود
@@ -485,18 +497,32 @@ class BacktestEngine:
         equity: Decimal,
     ) -> tuple[dict[str, Any], Decimal] | None:
         pip = self._pip
+        # FIX-06-GAP-STOP: Gap-aware Stop Loss.
+        # اگر کندل با Gap از Stop عبور کند، ضرر واقعی بر اساس قیمت open است، نه stop.
+        # این رفتار هم واقع‌گراتر و هم برای تریدر بدبینانه‌تر است.
         if position.direction is Direction.LONG:
-            if candle.low <= position.stop:
-                exit_price = position.stop - self.config.slippage_pips * pip
-                return self._close(position, exit_price, "STOP_LOSS", candle, equity)
+            stop_fill = None
+            if candle.open < position.stop:
+                # Gap Down → خروج در open (بدتر برای LONG)
+                stop_fill = candle.open - self.config.slippage_pips * pip
+            elif candle.low <= position.stop:
+                # داخل کندل به Stop رسیده
+                stop_fill = position.stop - self.config.slippage_pips * pip
+            if stop_fill is not None:
+                return self._close(position, stop_fill, "STOP_LOSS", candle, equity)
             if not position.tp1_hit and candle.high >= position.tp1:
                 self._partial(position, position.tp1)
             elif position.tp1_hit and candle.high >= position.tp2:
                 return self._close(position, position.tp2, "TARGET_2", candle, equity)
         else:
-            if candle.high >= position.stop:
-                exit_price = position.stop + self.config.slippage_pips * pip
-                return self._close(position, exit_price, "STOP_LOSS", candle, equity)
+            stop_fill = None
+            if candle.open > position.stop:
+                # Gap Up → خروج در open (بدتر برای SHORT)
+                stop_fill = candle.open + self.config.slippage_pips * pip
+            elif candle.high >= position.stop:
+                stop_fill = position.stop + self.config.slippage_pips * pip
+            if stop_fill is not None:
+                return self._close(position, stop_fill, "STOP_LOSS", candle, equity)
             if not position.tp1_hit and candle.low <= position.tp1:
                 self._partial(position, position.tp1)
             elif position.tp1_hit and candle.low <= position.tp2:
@@ -542,7 +568,12 @@ class BacktestEngine:
         remaining_pnl = (price - position.entry_price) * position.remaining * self._contract * rate * sign
         gross = position.realized + remaining_pnl
         commission = self.config.commission_per_lot * position.volume
-        nights = Decimal(position.bars_held) / Decimal("24")
+        # FIX-06-SWAP: nights = bars * (timeframe_minutes / 1440)
+        #   H1 → 1/24 روز به ازای هر کندل
+        #   H4 → 4/24 = 1/6 روز
+        #   M15 → 15/1440 = 1/96 روز
+        minutes_held = Decimal(position.bars_held) * Decimal(self._tf_minutes)
+        nights = minutes_held / Decimal("1440")
         swap = self.config.swap_per_lot_per_night * position.volume * nights
         net = gross - commission + swap
         spread = candle.spread if candle.spread is not None else self.config.spread_pips * self._pip

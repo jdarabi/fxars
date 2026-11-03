@@ -1,4 +1,4 @@
-﻿"""سرویس اجرای تحلیل: داده → شواهد → تصمیم → سناریو → ثبت و ممیزی."""
+"""سرویس اجرای تحلیل: داده → شواهد → تصمیم → سناریو → ثبت و ممیزی."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from fxars.instruments.calendar import TradingCalendar
 from fxars.storage.repositories import (
     AnalysisRepository,
     CandleRepository,
+    DataQualityRepository,
     EconomicEventRepository,
     InstrumentRepository,
     ScenarioRepository,
@@ -63,6 +64,7 @@ class AnalysisService:
         builder: ScenarioBuilder,
         state_machine: ScenarioStateMachine,
         calendar: TradingCalendar,
+        quality_runs: DataQualityRepository,
     ) -> None:
         self.settings = settings
         self.clock = clock
@@ -77,6 +79,7 @@ class AnalysisService:
         self.builder = builder
         self.state_machine = state_machine
         self.calendar = calendar
+        self.quality_runs = quality_runs
 
     def run(
         self,
@@ -99,7 +102,7 @@ class AnalysisService:
             for candle in self.candles.range(
                 instrument_id, tf.value, source_id=primary_source, as_of=moment, closed_only=True,
             )
-            if candle.quality_status is not QualityStatus.INVALID
+            if candle.quality_status is QualityStatus.VALID
         ]
         latest = candles[-1] if candles else None
         decision_time = latest.available_at if latest else moment
@@ -173,6 +176,65 @@ class AnalysisService:
                 outcome=None, scenario=None, scenario_reason="DATA_STALE",
                 status=AnalysisStatus.STALE, started_at=started_at, actor=actor,
                 correlation=correlation, stale=True,
+            )
+
+        # FIX-P0-DQ-FAIL: اگر آخرین DQ verdict=FAIL باشد، تحلیل مجاز نیست.
+        # این از ورود داده تکراری/معیوب (که ممکن است هر دو VALID باشند) جلوگیری می‌کند.
+        _dq_failed = False
+        _latest_dq = None
+        try:
+            # FIX-P0-DQ-FAIL-CALL: list() timeframe kwarg ندارد
+            _dq_all = self.quality_runs.list(instrument_id=instrument_id, limit=10)
+            _dq_runs = [r for r in _dq_all if r.timeframe == tf.value][:1]
+            if _dq_runs:
+                _latest_dq = _dq_runs[0]
+                if _latest_dq.verdict == "FAIL":
+                    _dq_failed = True
+        except Exception as _dq_exc:
+            # FIX-P0-DQ-FAIL: در صورت خطا، اجازه عبور (نه FAIL اجباری)
+            logger.warning("data quality check failed: %s", _dq_exc)
+            _dq_failed = False
+
+        if _dq_failed:
+            _dq_verdict = _latest_dq.verdict if _latest_dq else "UNKNOWN"
+            _dq_run_id = _latest_dq.run_id if _latest_dq else None
+            decision = Decision(
+                action=DecisionAction.NO_TRADE,
+                direction=Direction.NEUTRAL,
+                score=0.0,
+                confidence_raw=0.0,
+                family_scores={},
+                conflicts=(),
+                coverage=0.0,
+                stability=0.0,
+                reasons=(
+                    "کیفیت داده FAIL است؛ تحلیل مجاز نیست (Fail-Safe).",
+                    f"آخرین گزارش کیفیت: {_dq_verdict} (run_id={_dq_run_id})",
+                ),
+                evidence_ids=(),
+                no_trade_reason="DATA_QUALITY_FAIL",
+            )
+            _snap = snapshot_id(candles, instrument_id, tf.value) if candles else ""
+            _run_id = stable_id(
+                "ar", instrument_id, tf.value, _snap, self.settings.config_hash(),
+                self.settings.code_version, moment, length=24,
+            )
+            _dq_info = {
+                "bars": len(candles), "stale": False,
+                "dq_failed": True, "dq_verdict": _dq_verdict, "dq_run_id": _dq_run_id,
+                "latest_bar": format_ts(latest.open_time) if latest else None,
+                "latest_available_at": format_ts(latest.available_at) if latest else None,
+                "latest_quality": latest.quality_status.value if latest else None,
+                "snapshot_id": _snap,
+                "requested_as_of": format_ts(moment),
+                "decision_time": format_ts(decision_time),
+            }
+            return self._persist(
+                instrument_id=instrument_id, timeframe=tf.value, moment=decision_time, run_id=_run_id,
+                snapshot=_snap, data_quality=_dq_info, decision=decision, evidences=[],
+                outcome=None, scenario=None, scenario_reason="DATA_QUALITY_FAIL",
+                status=AnalysisStatus.NO_TRADE, started_at=started_at, actor=actor,
+                correlation=correlation, stale=False,
             )
 
         lookback = self.settings.analysis.fundamental_lookback_hours
@@ -447,3 +509,4 @@ class AnalysisService:
             scenario=scenario,
             scenario_reason=scenario_reason,
         )
+

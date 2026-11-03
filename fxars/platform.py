@@ -115,6 +115,7 @@ class Platform:
             events=self.events, analyses=self.analyses, scenarios=self.scenarios, audit=self.audit,
             outbox=self.outbox, engine=self.analysis_engine, builder=self.scenario_builder,
             state_machine=self.state_machine, calendar=self.calendar,
+            quality_runs=self.quality_runs,
         )
         self.scenario_service = ScenarioService(
             settings=self.settings, clock=self.clock, scenarios=self.scenarios, candles=self.candles,

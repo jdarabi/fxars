@@ -226,7 +226,10 @@ CREATE TABLE IF NOT EXISTS outbox (
     occurred_at    TEXT NOT NULL,
     correlation_id TEXT NOT NULL,
     payload        TEXT NOT NULL,
-    published_at   TEXT
+    published_at   TEXT,
+    attempts       INTEGER NOT NULL DEFAULT 0,
+    last_error     TEXT,
+    dead_letter_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox (published_at, occurred_at);
 
@@ -283,6 +286,7 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     status       INTEGER NOT NULL,
     response     TEXT NOT NULL,
     created_at   TEXT NOT NULL,
+    state        TEXT NOT NULL DEFAULT 'completed',
     PRIMARY KEY (key, user_id)
 );
 

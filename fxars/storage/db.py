@@ -89,6 +89,12 @@ class Database:
         # executescript خودش تراکنش را COMMIT می‌کند؛ بنابراین خارج از transaction صریح اجرا می‌شود.
         with self._lock:
             self._conn.executescript(script)
+            # FIX-09-OUTBOX-RETRY: افزودن ستون‌های جدید در صورت نبود
+            self._ensure_column("outbox", "attempts", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column("outbox", "last_error", "TEXT")
+            self._ensure_column("outbox", "dead_letter_at", "TEXT")
+            # FIX-09-IDEMPOTENCY-ATOMIC
+            self._ensure_column("idempotency_keys", "state", "TEXT NOT NULL DEFAULT 'completed'")
             current = self.scalar("SELECT MAX(version) FROM schema_migrations")
             if current is None:
                 self.execute(
@@ -100,6 +106,11 @@ class Database:
                     f"نسخه پایگاه داده ({current}) از نسخه کد ({SCHEMA_VERSION}) جدیدتر است.",
                     details={"db_version": current, "code_version": SCHEMA_VERSION},
                 )
+
+    def _ensure_column(self, table: str, column: str, ddl: str) -> None:
+        cols = [row["name"] for row in self.query(f"PRAGMA table_info({table})")]
+        if column not in cols:
+            self.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
     def close(self) -> None:
         with self._lock:

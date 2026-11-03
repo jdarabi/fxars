@@ -367,7 +367,11 @@ class Settings:
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "Settings":
-        """بارگذاری از فایل JSON (اختیاری) + بازنویسی متغیرهای محیطی."""
+        """بارگذاری از فایل JSON (اختیاری) + بازنویسی متغیرهای محیطی.
+
+        FIX-03-HARDEN-SECRET: در محیط prod، secret_key پیش‌فرض یا کوتاه
+        باعث fail-fast در startup می‌شود.
+        """
         config_path = Path(path) if path else Path(os.environ.get("FXARS_CONFIG", DEFAULT_CONFIG_PATH))
         data: dict[str, Any] = {}
         if config_path.exists():
@@ -385,4 +389,15 @@ class Settings:
             data.setdefault("api", {})["port"] = int(os.environ["FXARS_API_PORT"])
         if os.environ.get("FXARS_API_HOST"):
             data.setdefault("api", {})["host"] = os.environ["FXARS_API_HOST"]
-        return cls.from_dict(data)
+        settings = cls.from_dict(data)
+        # FIX-03-HARDEN-SECRET: در prod، secret_key ضعیف/پیش‌فرض مجاز نیست
+        if settings.environment == "prod":
+            insecure = {"dev-insecure-secret-change-me", "", "change-me", "secret"}
+            key = settings.security.secret_key
+            if key in insecure or len(key) < 32:
+                raise ValueError(
+                    "secret_key نامعتبر در محیط prod: باید حداقل ۳۲ کاراکتر تصادفی "
+                    "و متفاوت از مقدار پیش‌فرض باشد. "
+                    "این مقدار را از FXARS_SECRET_KEY یا config/security.secret_key تنظیم کنید."
+                )
+        return settings
