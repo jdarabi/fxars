@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fxars"
-version = "1.3.1"
+version = "1.4.5"
 description = "FX Analysis, Risk & Decision Support System (FX-ARS-SRS-ARCH-002) - MVP-1 reference implementation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,6 +22,9 @@ dev = [
     "ruff>=0.5",
     "coverage>=7.4",
 ]
+postgres = [
+    "psycopg[binary]>=3.1",
+]
 
 [project.scripts]
 fxars = "fxars.cli.main:main"
@@ -30,7 +33,11 @@ fxars = "fxars.cli.main:main"
 include = ["fxars*"]
 
 [tool.setuptools.package-data]
-fxars = ["storage/*.sql", "ui/*.html", "api/openapi.json"]
+fxars = [
+    "storage/*.sql",
+    "ui/*.html",
+    "api/openapi.json",
+]
 
 # ---------------------------------------------------------------------------
 # Tooling configuration
@@ -49,6 +56,7 @@ exclude = [
     "*.egg-info",
     "data",
     "reports",
+    "reports/baseline-*",
 ]
 
 [tool.ruff.lint]
@@ -121,16 +129,19 @@ omit = [
     "fxars/__main__.py",
     "fxars/ui/*",
     "*/__init__.py",
+    "fxars/storage/postgres.py",  # skeleton, tested only when psycopg is installed
 ]
 
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+fail_under = 60
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
     "@abstractmethod",
+    "raise PostgresUnavailableError",
 ]
 
 [tool.pytest.ini_options]
