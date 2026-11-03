@@ -187,6 +187,9 @@ class BacktestEngine:
         # FIX-06-SWAP: مدت هر کندل به دقیقه، برای محاسبه دقیق Swap
         from fxars.domain.enums import Timeframe as _TF
         self._tf_minutes = _TF.parse(timeframe).minutes
+        # FIX-09-PRECOMPUTE: کش Structure و Indicator
+        self._precomputed_indicators = None
+        self._precomputed_structure_per_bar = None
         # FIX-05-BACKTEST-PARITY: builder/evaluator برای حالت scenario
         from fxars.decision.scenario import ScenarioBuilder
         from fxars.decision.trigger import TriggerEvaluator
@@ -200,6 +203,34 @@ class BacktestEngine:
         self._fallback_count = 0
         self._fallback_errors: dict[str, int] = {}
 
+    def _precompute(self, candles: Sequence[Candle]) -> None:
+        """FIX-09-PRECOMPUTE: محاسبه یک‌بار Structure و Indicator روی کل سری.
+
+        نتیجه: در هر کندل، Structure فقط تا همان کندل دیده می‌شود (بدون look-ahead)
+        اما محاسبه از قبل انجام شده و در simulate فقط «نگاه» می‌کنیم.
+        """
+        from fxars.analysis.context import IndicatorSet
+        from fxars.analysis.structure import StructureModule
+        from fxars.analysis.engine import AnalysisOutcome
+        from fxars.analysis.structure import StructureResult
+
+        # یک بار Indicator روی کل سری
+        self._precomputed_indicators = IndicatorSet.build(list(candles), self.analysis)
+
+        # برای Structure: در هر کندل i، ما یک پنجره [0..i] داریم.
+        # ساده‌ترین راه: پنجره کامل را بگیریم، اما StructureModule خودش causal است
+        # (swing فقط بعد از تأیید در i+k ثبت می‌شود). پس یک بار روی کل سری اجرا می‌کنیم
+        # و در هر کندل، فیلتر می‌کنیم که فقط شواهد با available_at <= available_at[i] را ببینیم.
+        from fxars.analysis.context import AnalysisContext
+        from fxars.analysis.evidence import EvidenceFactory
+
+        # ساده‌تر: در هر کندل، یک AnalysisContext سبک با کندل‌های [0..i] بسازیم
+        # اما برای performance، فقط از StructureModule استفاده می‌کنیم، نه کل Engine.
+        # راه‌حل: یک بار Structure روی کل سری، سپس در هر کندل فقط swingهای تأییدشده تا i.
+        # این کار در simulate انجام می‌شود که هر بار یک پنجره کوچک می‌گیرد.
+        # فعلاً فقط indicators را precompute می‌کنیم.
+        self._precomputed_structure_per_bar = None  # فعلاً پیاده نشده
+
     def simulate(
         self,
         candles: Sequence[Candle],
@@ -210,6 +241,8 @@ class BacktestEngine:
         initial_equity: Decimal | None = None,
     ) -> BacktestOutput:
         candles = list(candles)
+        # FIX-09-PRECOMPUTE
+        self._precompute(candles)
         if end_index - start_index < 2:
             return BacktestOutput(
                 [], [],
@@ -383,16 +416,40 @@ class BacktestEngine:
         try:
             from fxars.analysis.engine import AnalysisOutcome
             from fxars.analysis.context import IndicatorSet
-            window = candles[max(0, index - 600): index + 1]
-            indicators = IndicatorSet.build(window, self.analysis)
-            # ساخت StructureResult حداقلی برای builder
             from fxars.analysis.structure import StructureResult, Swing
+            # FIX-09-USE-PRECOMPUTED: IndicatorSet از cache یا ساخت مجدد
+            if self._precomputed_indicators is not None:
+                # ساخت یک IndicatorSet با آرایه‌های برش‌خورده تا index
+                from fxars.analysis.context import IndicatorSet as _IS
+                pre = self._precomputed_indicators
+                indicators = _IS(
+                    ema_fast=tuple(pre.ema_fast[:index + 1]),
+                    ema_slow=tuple(pre.ema_slow[:index + 1]),
+                    ema_trend=tuple(pre.ema_trend[:index + 1]),
+                    rsi=tuple(pre.rsi[:index + 1]),
+                    roc=tuple(pre.roc[:index + 1]),
+                    atr=tuple(pre.atr[:index + 1]),
+                    atr_percentile=tuple(pre.atr_percentile[:index + 1]),
+                    real_vol_short=tuple(pre.real_vol_short[:index + 1]),
+                    real_vol_long=tuple(pre.real_vol_long[:index + 1]),
+                )
+                window = candles[max(0, index - 600): index + 1]
+            else:
+                window = candles[max(0, index - 600): index + 1]
+                indicators = IndicatorSet.build(window, self.analysis)
+            # FIX-09-PARITY: Structure واقعی از Swingهای پنجره، نه max/min 20 کندل
             structure = StructureResult()
             if window:
-                highs = max(window[-20:], key=lambda c: c.high)
-                lows = min(window[-20:], key=lambda c: c.low)
-                structure.last_swing_high = Swing(index=0, price=highs.high, kind="HIGH", confirmed_index=0)
-                structure.last_swing_low = Swing(index=0, price=lows.low, kind="LOW", confirmed_index=0)
+                # swingهای معتبر با تأیید در پنجره فعلی
+                from fxars.analysis.structure import find_swings
+                swings = find_swings(window, self.analysis.swing_k)
+                # فقط swingهایی که confirmed_index + swing_k <= len(window) - 1
+                # find_swings خودش این را بررسی می‌کند
+                if swings:
+                    highs = [s for s in swings if s.kind == "HIGH"]
+                    lows = [s for s in swings if s.kind == "LOW"]
+                    structure.last_swing_high = highs[-1] if highs else None
+                    structure.last_swing_low = lows[-1] if lows else None
             outcome = AnalysisOutcome(
                 instrument=self.instrument, timeframe=self.timeframe,
                 as_of=candles[index].available_at, candles=list(window),
