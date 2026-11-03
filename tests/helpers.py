@@ -32,8 +32,19 @@ class Clock:
 
 
 class TestEnv:
-    def __init__(self, *, bars: int = 800, users: bool = False, environment: str = "dev") -> None:
-        self.settings = Settings.from_dict({"phase": "READ_ONLY", "db_path": ":memory:", "environment": environment})
+    def __init__(
+        self,
+        *,
+        bars: int = 800,
+        users: bool = False,
+        environment: str = "dev",
+        phase: str = "READ_ONLY",
+    ) -> None:
+        self.settings = Settings.from_dict({
+            "phase": phase,
+            "db_path": ":memory:",
+            "environment": environment,
+        })
         self.calendar = TradingCalendar(default_holidays())
         start = datetime(2026, 2, 1, 22, 0, tzinfo=UTC)
         self.clock = Clock(start)
@@ -65,5 +76,11 @@ class TestEnv:
         self.platform.close()
 
 
-def make_env(*, bars: int = 800, users: bool = False, environment: str = "dev") -> TestEnv:
-    return TestEnv(bars=bars, users=users, environment=environment)
+def make_env(
+    *,
+    bars: int = 800,
+    users: bool = False,
+    environment: str = "dev",
+    phase: str = "READ_ONLY",
+) -> TestEnv:
+    return TestEnv(bars=bars, users=users, environment=environment, phase=phase)
