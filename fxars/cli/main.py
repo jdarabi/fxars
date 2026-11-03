@@ -15,7 +15,7 @@ from fxars.analysis.modules import module_specs
 from fxars.config.settings import Settings
 from fxars.core.timeutil import parse_ts, utcnow
 from fxars.data.synthetic import generate_demo_bundle
-from fxars.domain.enums import BacktestSegment, Role, ScenarioStatus
+from fxars.domain.enums import BacktestSegment, OrderStatus, Role, ScenarioStatus
 from fxars.platform import Platform
 from fxars.research.report import write_report
 from fxars.risk.account import demo_account
@@ -167,6 +167,9 @@ def cmd_risk(args: argparse.Namespace) -> None:
 def cmd_backtest(args: argparse.Namespace) -> None:
     platform = _platform(args)
     overrides = json.loads(args.overrides) if args.overrides else {}
+    # P6-4: --allowed-regimes shortcut for the common case
+    if getattr(args, "allowed_regimes", None):
+        overrides["allowed_regimes"] = [r.strip() for r in args.allowed_regimes.split(",") if r.strip()]
     result = platform.run_backtest(args.instrument, args.timeframe, overrides=overrides,
                                    segment=BacktestSegment(args.segment))
     metrics = result.run.metrics
@@ -262,6 +265,75 @@ def cmd_auth_code(args: argparse.Namespace) -> None:
     platform.close()
 
 
+def cmd_reconcile(args: argparse.Namespace) -> None:
+    """P6-3: تطبیق سفارش‌های UNKNOWN با Broker."""
+    from fxars.execution.reconciliation import ReconciliationService
+
+    platform = _platform(args)
+    try:
+        svc = ReconciliationService(
+            orders=platform.orders,
+            broker=platform.execution.broker,
+            audit=platform.audit,
+            outbox=platform.outbox,
+            clock=platform.clock,
+        )
+        results = svc.reconcile_all(actor=args.actor)
+        if not results:
+            print("(سفارشی در وضعیت UNKNOWN برای تطبیق یافت نشد)")
+        else:
+            for r in results:
+                print(f"  {r.intent_id}: {r.from_status.value} → {r.to_status.value} ({r.reason})")
+        print(f"تعداد تطبیق‌شده: {len(results)}")
+    finally:
+        platform.close()
+
+
+def cmd_orders(args: argparse.Namespace) -> None:
+    """P6-3: مدیریت سفارش‌ها."""
+    platform = _platform(args)
+    try:
+        if args.action == "list":
+            if args.status:
+                try:
+                    status = OrderStatus(args.status.upper())
+                except ValueError:
+                    print(f"وضعیت نامعتبر: {args.status}. مقادیر مجاز: {[s.value for s in OrderStatus]}")
+                    return
+                items = platform.orders.list_intents_by_status(status, limit=args.limit)
+            else:
+                items = []
+                for st in OrderStatus:
+                    items.extend(platform.orders.list_intents_by_status(st, limit=args.limit))
+            if not items:
+                print("(سفارشی یافت نشد)")
+            else:
+                rows = [{
+                    "id": item.intent_id,
+                    "status": item.status.value,
+                    "client": item.client_order_id,
+                    "instrument": item.instrument_id,
+                    "side": item.side.value,
+                    "volume": str(item.volume),
+                    "created": item.created_at.isoformat(),
+                } for item in items[:args.limit]]
+                _print_table(rows, [
+                    ("id", "شناسه"), ("status", "وضعیت"), ("client", "client_order_id"),
+                    ("instrument", "نماد"), ("side", "جهت"), ("volume", "حجم"), ("created", "ایجاد"),
+                ])
+        elif args.action == "show":
+            if not args.intent_id:
+                print("--intent-id الزامی است برای show", file=sys.stderr)
+                raise SystemExit(2)
+            item = platform.orders.get_intent(args.intent_id)
+            if item is None:
+                print(f"سفارش {args.intent_id} یافت نشد")
+            else:
+                print(json.dumps(item.to_dict(), ensure_ascii=False, indent=2))
+    finally:
+        platform.close()
+
+
 def cmd_ac(args: argparse.Namespace) -> None:
     import unittest
 
@@ -342,6 +414,10 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--timeframe", default="H1")
     backtest.add_argument("--segment", default="ALL", choices=[item.value for item in BacktestSegment])
     backtest.add_argument("--overrides", help="JSON پارامترهای بازنویسی")
+    backtest.add_argument(
+        "--allowed-regimes", dest="allowed_regimes",
+        help="فهرست رژیم‌های مجاز با کاما (مثلاً TRENDING_UP,TRENDING_DOWN)",
+    )
     backtest.add_argument("--report", action="store_true")
     backtest.set_defaults(func=cmd_backtest)
 
@@ -384,6 +460,17 @@ def build_parser() -> argparse.ArgumentParser:
     code.add_argument("action", choices=["code"])
     code.add_argument("--username", default="admin")
     code.set_defaults(func=cmd_auth_code)
+
+    reconcile = sub.add_parser("reconcile", parents=[common], help="تطبیق سفارش‌های UNKNOWN")
+    reconcile.add_argument("--actor", default="cli")
+    reconcile.set_defaults(func=cmd_reconcile)
+
+    orders = sub.add_parser("orders", parents=[common], help="مدیریت سفارش‌ها")
+    orders.add_argument("action", choices=["list", "show"])
+    orders.add_argument("--status", help="فیلتر وضعیت")
+    orders.add_argument("--limit", type=int, default=50)
+    orders.add_argument("--intent-id", dest="intent_id")
+    orders.set_defaults(func=cmd_orders)
 
     ac = sub.add_parser("ac", help="اجرای آزمون‌های پذیرش")
     ac.set_defaults(func=cmd_ac)
