@@ -1,8 +1,5 @@
-﻿"""HTTP API با کتابخانه استاندارد (بدون وابستگی خارجی).
+﻿"""HTTP API با کتابخانه استاندارد (بدون وابستگی خارجی)."""
 
-قرارداد: مسیرهای نسخه‌دار /api/v1، خطای ساختاریافته، RBAC سمت سرور، rate limit،
-Idempotency-Key برای عملیات حساس و correlation_id در همه پاسخ‌ها.
-"""
 from __future__ import annotations
 
 import json
@@ -16,6 +13,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
+from fxars.api.metrics import get_registry
+from fxars.api.metrics_dashboard import render_metrics_dashboard
 from fxars.api.openapi import docs_html, openapi_spec
 from fxars.core.context import correlation_scope, current_correlation_id
 from fxars.core.errors import (
@@ -27,7 +26,6 @@ from fxars.core.errors import (
 )
 from fxars.core.hashing import sha256_obj
 from fxars.core.logging_setup import get_logger
-from fxars.api.metrics import get_registry
 from fxars.core.serde import jsonable
 from fxars.core.timeutil import format_ts, parse_ts
 from fxars.domain.enums import BacktestSegment, Permission, ScenarioStatus
@@ -118,6 +116,7 @@ class ApiApp:
         add("GET", r"^/api/v1/health/live$", self._health_live, public=True)
         add("GET", r"^/api/v1/health/ready$", self._health_ready, public=True)
         add("GET", r"^/api/v1/metrics$", self._metrics_endpoint, public=True)
+        add("GET", r"^/metrics-dashboard$", self._metrics_dashboard, public=True)
         add("POST", r"^/api/v1/auth/login$", self._login, public=True)
         add("POST", r"^/api/v1/auth/demo-login$", self._demo_login, public=True)
         add("GET", r"^/api/v1/auth/demo-totp$", self._demo_totp, public=True)
@@ -276,6 +275,20 @@ class ApiApp:
         self.metrics.set_gauge("fxars_outbox_pending", float(self.platform.outbox.pending_count))
         text = self.metrics.render_prometheus()
         return ApiResponse(200, text.encode("utf-8"), content_type="text/plain; version=0.0.4; charset=utf-8")
+
+    def _metrics_dashboard(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        self.metrics.set_gauge("fxars_audit_valid", 1.0 if self.platform.audit.verify()["valid"] else 0.0)
+        self.metrics.set_gauge("fxars_killswitch_active", 1.0 if self.platform.killswitch.is_active() else 0.0)
+        self.metrics.set_gauge("fxars_outbox_pending", float(self.platform.outbox.pending_count))
+        snapshot = self.metrics.snapshot()
+        prometheus = self.metrics.render_prometheus()
+        html = render_metrics_dashboard(snapshot, prometheus_text=prometheus)
+        return ApiResponse(
+            200,
+            html.encode("utf-8"),
+            content_type="text/html; charset=utf-8",
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
 
     def _health(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         db_ok = self.platform.db.query_one("SELECT 1 AS ok") is not None
@@ -631,7 +644,6 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         max_bytes = self.server.app.settings.api.max_body_bytes  # type: ignore[attr-defined]
         if length > max_bytes:
-            # FIX-P2-3: drain body so client can finish sending and read the 413 response
             remaining = length
             while remaining > 0:
                 chunk = self.rfile.read(min(remaining, 65536))
