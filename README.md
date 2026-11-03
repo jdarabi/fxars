@@ -15,7 +15,7 @@
 | ممیزی | Audit زنجیره‌هش فقط‌افزودنی + Transactional Outbox |
 | اجرا (MVP-2) | PaperBroker با fault injection (reject/timeout/partial)، Reconciliation، Phase Guard |
 | زیرساخت | Migration framework (up/down/history)، Storage Protocol (SQLite + InMemory + Postgres-ready)، Structured logging با redaction |
-| آزمون | **۳۳۸ تست** (unit + property + HTTP + security + acceptance) |
+| آزمون | **363 تست** (unit + property + HTTP + security + acceptance) |
 
 ## نتایج کلیدی (دمو EURUSD/H1)
 

@@ -661,12 +661,47 @@ class OutboxRepository:
         )
 
     def pending(self, limit: int = 100) -> list[dict[str, Any]]:
-        rows = self.db.query("SELECT * FROM outbox WHERE published_at IS NULL ORDER BY occurred_at LIMIT ?", (limit,))
+        rows = self.db.query(
+            "SELECT * FROM outbox WHERE published_at IS NULL AND dead_letter_at IS NULL "
+            "ORDER BY occurred_at LIMIT ?",
+            (limit,),
+        )
         return [
             {
-                "event_id": row["event_id"], "event_type": row["event_type"], "schema_version": row["schema_version"],
-                "occurred_at": row["occurred_at"], "correlation_id": row["correlation_id"], "payload": _load(row["payload"]),
-                "published_at": row["published_at"],
+                "event_id": row["event_id"], "event_type": row["event_type"],
+                "schema_version": row["schema_version"], "occurred_at": row["occurred_at"],
+                "correlation_id": row["correlation_id"], "payload": _load(row["payload"]),
+                "published_at": row["published_at"], "attempts": int(row["attempts"] or 0),
+            }
+            for row in rows
+        ]
+
+    def attempts_for(self, event_id: str) -> int:
+        return int(self.db.scalar("SELECT attempts FROM outbox WHERE event_id=?", (event_id,)) or 0)
+
+    def bump_attempt(self, event_id: str, *, last_error: str = "") -> None:
+        self.db.execute(
+            "UPDATE outbox SET attempts = attempts + 1, last_error=? WHERE event_id=?",
+            (last_error, event_id),
+        )
+
+    def mark_dead_letter(self, event_id: str, when, *, reason: str = "") -> None:
+        from fxars.core.timeutil import format_ts
+        self.db.execute(
+            "UPDATE outbox SET dead_letter_at=?, last_error=? WHERE event_id=?",
+            (format_ts(when), reason, event_id),
+        )
+
+    def dead_letters(self, limit: int = 100) -> list[dict[str, Any]]:
+        rows = self.db.query(
+            "SELECT * FROM outbox WHERE dead_letter_at IS NOT NULL ORDER BY dead_letter_at LIMIT ?",
+            (limit,),
+        )
+        return [
+            {
+                "event_id": row["event_id"], "event_type": row["event_type"],
+                "dead_letter_at": row["dead_letter_at"], "last_error": row["last_error"],
+                "attempts": int(row["attempts"] or 0),
             }
             for row in rows
         ]
@@ -817,9 +852,52 @@ class IdempotencyRepository:
 
     def put(self, key: str, user_id: str, route: str, request_hash: str, status: int, response: dict[str, Any]) -> None:
         self.db.execute(
-            "INSERT OR REPLACE INTO idempotency_keys (key, user_id, route, request_hash, status, response, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO idempotency_keys (key, user_id, route, request_hash, status, response, created_at, state) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')",
             (key, user_id, route, request_hash, status, _dump(response), format_ts(utcnow())),
+        )
+
+    def begin(self, key: str, user_id: str, route: str, request_hash: str) -> tuple[str, dict[str, Any] | None]:
+        """FIX-09-IDEMPOTENCY-ATOMIC: ثبت pending اتمیک قبل از Action.
+
+        ("replay", response)  | ("conflict", None) | ("in_progress", None) | ("proceed", None)
+        """
+        row = self.db.query_one(
+            "SELECT state, request_hash, status, response FROM idempotency_keys WHERE key=? AND user_id=?",
+            (key, user_id),
+        )
+        if row is not None:
+            state = row["state"] or "completed"
+            # FIX-09-IDEMPOTENCY-ATOMIC: state='failed' → همیشه اجازه retry (حتی با hash متفاوت)
+            if state == "failed":
+                # fall through → اجرای دوباره با hash جدید
+                pass
+            elif row["request_hash"] != request_hash:
+                # completed/pending با hash متفاوت → conflict
+                return ("conflict", None)
+            elif state == "completed":
+                return ("replay", {"status": int(row["status"]), "response": _load(row["response"])})
+            elif state == "pending":
+                return ("in_progress", None)
+        self.db.execute(
+            "INSERT OR REPLACE INTO idempotency_keys "
+            "(key, user_id, route, request_hash, status, response, created_at, state) "
+            "VALUES (?, ?, ?, ?, 0, '{}', ?, 'pending')",
+            (key, user_id, route, request_hash, format_ts(utcnow())),
+        )
+        return ("proceed", None)
+
+    def complete(self, key: str, user_id: str, status: int, response: dict[str, Any]) -> None:
+        self.db.execute(
+            "UPDATE idempotency_keys SET status=?, response=?, state='completed' "
+            "WHERE key=? AND user_id=?",
+            (status, _dump(response), key, user_id),
+        )
+
+    def fail(self, key: str, user_id: str) -> None:
+        self.db.execute(
+            "UPDATE idempotency_keys SET state='failed' WHERE key=? AND user_id=?",
+            (key, user_id),
         )
 
 

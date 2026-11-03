@@ -162,7 +162,7 @@ class ResearchService:
                 instrument_id, timeframe, source_id=primary_source,
                 as_of=as_of, closed_only=True,
             )
-            if candle.quality_status is not QualityStatus.INVALID
+            if candle.quality_status is QualityStatus.VALID
         ]
         if len(candles) < self.settings.analysis.min_bars + 20:
             raise ValueError(

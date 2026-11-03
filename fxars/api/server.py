@@ -1,4 +1,4 @@
-﻿"""HTTP API با کتابخانه استاندارد (بدون وابستگی خارجی)."""
+"""HTTP API با کتابخانه استاندارد (بدون وابستگی خارجی)."""
 
 from __future__ import annotations
 
@@ -96,6 +96,29 @@ class RateLimiter:
             bucket.append(now)
             return True
 
+    def hits_for(self, key: str) -> int:
+        """FIX-08: تعداد Hits معتبر فعلی یک کلید در پنجره."""
+        now = time.monotonic()
+        with self._lock:
+            bucket = self._hits.get(key)
+            if bucket is None:
+                return 0
+            while bucket and now - bucket[0] > self.window:
+                bucket.popleft()
+            return len(bucket)
+
+    def snapshot(self) -> dict[str, int]:
+        """FIX-08: عکس فوری از Bucketهای غیرخالی."""
+        now = time.monotonic()
+        with self._lock:
+            result: dict[str, int] = {}
+            for key, bucket in list(self._hits.items()):
+                while bucket and now - bucket[0] > self.window:
+                    bucket.popleft()
+                if bucket:
+                    result[key] = len(bucket)
+            return result
+
 
 class ApiApp:
     def __init__(self, platform: Platform) -> None:
@@ -113,6 +136,7 @@ class ApiApp:
             self.routes.append((method, re.compile(pattern), handler, permission, public))
 
         add("GET", r"^/api/v1/health$", self._health, public=True)
+        add("GET", r"^/api/v1/debug/rate-status$", self._rate_status, public=True)
         add("GET", r"^/api/v1/health/live$", self._health_live, public=True)
         add("GET", r"^/api/v1/health/ready$", self._health_ready, public=True)
         add("GET", r"^/api/v1/metrics$", self._metrics_endpoint, public=True)
@@ -185,14 +209,19 @@ class ApiApp:
             matched_methods.add(method)
             if method != request.method:
                 continue
-            key = self._rate_key(request)
-            if not self.limiter.allow(key):
+            # FIX-08: Rate limit قبل از auth با IP
+            ip_key = f"ip:{request.ip or 'unknown'}"
+            if not self.limiter.allow(ip_key):
                 raise RateLimitedError()
             user = None
             if not public:
                 user = self._authenticate(request)
                 if permission is not None:
                     require_permission(user.role, permission)
+                # FIX-08: Rate limit بعد از auth با user_id
+                user_key = f"user:{user.user_id}"
+                if not self.limiter.allow(user_key):
+                    raise RateLimitedError()
             if request.method == "POST" and not public:
                 return self._with_idempotency(request, user, lambda: handler(request, match.groupdict(), user))
             return handler(request, match.groupdict(), user)
@@ -220,9 +249,7 @@ class ApiApp:
             raise AuthenticationError("نشست نامعتبر یا منقضی است.")
         return resolved[0]
 
-    def _rate_key(self, request: ApiRequest) -> str:
-        header = request.headers.get("authorization", "")
-        return header[7:][:24] if header else request.ip
+    # FIX-08: _rate_key حذف شد؛ کلیدها در _dispatch ساخته می‌شوند.
 
     def _token(self, request: ApiRequest) -> str:
         return request.headers.get("authorization", "")[7:].strip()
@@ -234,16 +261,30 @@ class ApiApp:
                 raise ValidationError("برای عملیات POST هدر Idempotency-Key الزامی است.")
             return action()
         request_hash = sha256_obj({"path": request.path, "body": request.body.decode("utf-8", "replace")})
-        existing = self.platform.idempotency.get(key, user.user_id)
-        if existing is not None:
-            if existing["request_hash"] != request_hash:
-                from fxars.core.errors import IdempotencyConflictError
-
-                raise IdempotencyConflictError(details={"key": key})
+        # FIX-09-IDEMPOTENCY-ATOMIC
+        outcome, existing = self.platform.idempotency.begin(
+            key, user.user_id, request.path, request_hash,
+        )
+        if outcome == "replay" and existing is not None:
             return self._json(existing["status"], existing["response"])
-        response = action()
+        if outcome == "conflict":
+            from fxars.core.errors import IdempotencyConflictError
+            raise IdempotencyConflictError(details={"key": key})
+        if outcome == "in_progress":
+            from fxars.core.errors import ConflictError
+            raise ConflictError(
+                "درخواست با همین Idempotency-Key در حال پردازش است؛ دوباره تلاش کنید.",
+                details={"key": key},
+            )
+
+        try:
+            response = action()
+        except Exception:
+            self.platform.idempotency.fail(key, user.user_id)
+            raise
+
         payload = json.loads(response.body.decode("utf-8")) if response.body else {}
-        self.platform.idempotency.put(key, user.user_id, request.path, request_hash, response.status, payload)
+        self.platform.idempotency.complete(key, user.user_id, response.status, payload)
         return response
 
     def _json(self, status: int, payload: Any, headers: dict[str, str] | None = None) -> ApiResponse:
@@ -300,6 +341,18 @@ class ApiApp:
             "killswitch": self.platform.killswitch.is_active(),
         })
 
+    def _rate_status(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        """FIX-08-RATE-LIMIT: وضعیت Rate Limit (فقط dev + localhost)."""
+        if self.settings.environment != "dev":
+            raise NotFoundError("مسیر درخواستی یافت نشد.", details={"path": request.path})
+        if request.ip not in ("127.0.0.1", "::1", ""):
+            raise NotFoundError("مسیر درخواستی یافت نشد.", details={"path": request.path})
+        return self._json(200, {
+            "limit_per_minute": self.limiter.limit,
+            "window_seconds": self.limiter.window,
+            "buckets": self.limiter.snapshot(),
+        })
+
     def _login(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         body = request.json()
         result = self.identity.login(
@@ -318,7 +371,20 @@ class ApiApp:
         return self._json(200, {"status": "logged_out"})
 
     def _demo_enabled(self, request: ApiRequest) -> bool:
-        return self.settings.environment == "dev" and request.ip in ("127.0.0.1", "::1", "")
+        """FIX-03-HARDEN-DEMO: ورود دمو فقط با شرط سه‌گانه.
+
+        1) environment == "dev"
+        2) IP لوکال (127.0.0.1 یا ::1)
+        3) متغیر محیطی FXARS_ENABLE_DEMO=1 صریحاً ست شده باشد
+
+        شرط سوم از فعال‌شدن ناخواسته دمو در صورت Reverse Proxy جلوگیری می‌کند.
+        """
+        import os as _os
+        if self.settings.environment != "dev":
+            return False
+        if request.ip not in ("127.0.0.1", "::1", ""):
+            return False
+        return _os.environ.get("FXARS_ENABLE_DEMO", "") == "1"
 
     def _require_demo(self, request: ApiRequest) -> None:
         if not self._demo_enabled(request):
@@ -749,3 +815,4 @@ def serve(platform: Platform, host: str | None = None, port: int | None = None) 
         print("\nstopping...")
     finally:
         server.server_close()
+# FIX-08-RATE-LIMIT

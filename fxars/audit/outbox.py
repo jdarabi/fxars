@@ -65,23 +65,42 @@ class Outbox:
         handlers: dict[str, Callable[[dict[str, Any]], None]],
         *,
         limit: int = 100,
+        max_attempts: int = 5,
     ) -> dict[str, int]:
-        """پردازش رویدادها؛ خطای یک handler مانع بقیه نمی‌شود و رویداد منتشرنشده می‌ماند."""
-        stats = {"published": 0, "failed": 0, "skipped": 0}
+        """FIX-09-OUTBOX-RETRY: پردازش با retry و dead-letter.
+
+        * handler ناموجود ⇒ skip (نه publish) تا بعداً قابل پردازش باشد.
+        * خطای handler ⇒ attempts++ و پس از max_attempts → dead-letter.
+        """
+        stats = {"published": 0, "failed": 0, "skipped": 0, "dead_lettered": 0}
         for event in self.pending(limit):
             handler = handlers.get(event["event_type"])
             if handler is None:
-                self.repo.mark_published(event["event_id"], utcnow())
                 stats["skipped"] += 1
+                continue
+            attempts = self.repo.attempts_for(event["event_id"])
+            if attempts >= max_attempts:
+                self.repo.mark_dead_letter(
+                    event["event_id"], utcnow(), reason=f"max_attempts={max_attempts}",
+                )
+                stats["dead_lettered"] += 1
                 continue
             try:
                 handler(event)
             except FxarsError as exc:
-                logger.warning("outbox handler failed", extra={"data": {"event": event["event_id"], "error": exc.code}})
+                logger.warning(
+                    "outbox handler failed",
+                    extra={"data": {"event": event["event_id"], "error": exc.code, "attempt": attempts + 1}},
+                )
+                self.repo.bump_attempt(event["event_id"], last_error=str(exc))
                 stats["failed"] += 1
                 continue
-            except Exception as exc:  # pragma: no cover - دفاعی
-                logger.exception("outbox handler crashed", extra={"data": {"event": event["event_id"]}})
+            except Exception as exc:
+                logger.exception(
+                    "outbox handler crashed",
+                    extra={"data": {"event": event["event_id"]}},
+                )
+                self.repo.bump_attempt(event["event_id"], last_error=type(exc).__name__)
                 stats["failed"] += 1
                 continue
             self.repo.mark_published(event["event_id"], utcnow())
