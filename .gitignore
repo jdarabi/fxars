@@ -26,3 +26,4 @@ p0p1-tests.log
 full-suite.log
 test_results.log
 *.docx
+reports/benchmark-*/
