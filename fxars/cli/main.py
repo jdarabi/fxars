@@ -265,6 +265,77 @@ def cmd_auth_code(args: argparse.Namespace) -> None:
     platform.close()
 
 
+def cmd_outbox(args: argparse.Namespace) -> None:
+    """FIX-08-OUTBOX-CLI: مدیریت Outbox."""
+    platform = _platform(args)
+    try:
+        repo = platform.outbox_repo
+        if args.action == "pending":
+            items = repo.pending(limit=args.limit)
+            if not items:
+                print("(هیچ رویداد pending وجود ندارد)")
+            else:
+                rows = [{
+                    "event_id": item["event_id"],
+                    "event_type": item["event_type"],
+                    "occurred_at": item["occurred_at"],
+                    "attempts": item.get("attempts", 0),
+                } for item in items[:args.limit]]
+                _print_table(rows, [
+                    ("event_id", "شناسه"), ("event_type", "نوع"),
+                    ("occurred_at", "زمان"), ("attempts", "تلاش"),
+                ])
+            print(f"\nتعداد pending: {len(items)}")
+
+        elif args.action == "dead-letters":
+            items = repo.dead_letters(limit=args.limit)
+            if not items:
+                print("(هیچ رویداد dead-letter وجود ندارد)")
+            else:
+                rows = [{
+                    "event_id": item["event_id"],
+                    "event_type": item["event_type"],
+                    "dead_letter_at": item["dead_letter_at"],
+                    "attempts": item.get("attempts", 0),
+                    "last_error": (item.get("last_error") or "")[:40],
+                } for item in items[:args.limit]]
+                _print_table(rows, [
+                    ("event_id", "شناسه"), ("event_type", "نوع"),
+                    ("dead_letter_at", "زمان"), ("attempts", "تلاش"),
+                    ("last_error", "خطا"),
+                ])
+            print(f"\nتعداد dead-letter: {len(items)}")
+
+        elif args.action == "publish":
+            stats = platform.outbox.publish_pending(
+                platform.outbox_handlers, limit=args.limit,
+            )
+            print(json.dumps({
+                "stats": stats,
+                "consumer": platform.outbox_stats.snapshot(),
+            }, ensure_ascii=False, indent=2))
+
+        elif args.action == "retry-dead-letters":
+            items = repo.dead_letters(limit=args.limit)
+            count = 0
+            with platform.db.transaction():
+                for item in items:
+                    platform.db.execute(
+                        "UPDATE outbox SET dead_letter_at=NULL, attempts=0, last_error=NULL "
+                        "WHERE event_id=?",
+                        (item["event_id"],),
+                    )
+                    count += 1
+            print(f"تعداد {count} رویداد از dead-letter به pending بازگشت.")
+            if count:
+                stats = platform.outbox.publish_pending(
+                    platform.outbox_handlers, limit=count,
+                )
+                print(json.dumps(stats, ensure_ascii=False, indent=2))
+    finally:
+        platform.close()
+
+
 def cmd_reconcile(args: argparse.Namespace) -> None:
     """P6-3: تطبیق سفارش‌های UNKNOWN با Broker."""
     from fxars.execution.reconciliation import ReconciliationService
@@ -472,6 +543,11 @@ def build_parser() -> argparse.ArgumentParser:
     orders.add_argument("--intent-id", dest="intent_id")
     orders.set_defaults(func=cmd_orders)
 
+    outbox = sub.add_parser("outbox", parents=[common], help="مدیریت Outbox")
+    outbox.add_argument("action", choices=["pending", "dead-letters", "publish", "retry-dead-letters"])
+    outbox.add_argument("--limit", type=int, default=100)
+    outbox.set_defaults(func=cmd_outbox)
+
     ac = sub.add_parser("ac", help="اجرای آزمون‌های پذیرش")
     ac.set_defaults(func=cmd_ac)
 
@@ -498,3 +574,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+# FIX-08-OUTBOX-CLI

@@ -166,6 +166,8 @@ class ApiApp:
         add("GET", r"^/api/v1/backtests/(?P<run_id>[A-Za-z0-9_\-]+)/report$", self._backtest_report, Permission.REPORT_READ)
         add("GET", r"^/api/v1/audit-events$", self._audit, Permission.AUDIT_READ)
         add("GET", r"^/api/v1/killswitch$", self._killswitch_get, Permission.SCENARIO_READ)
+        add("GET", r"^/api/v1/outbox/stats$", self._outbox_stats, Permission.AUDIT_READ)
+        add("POST", r"^/api/v1/outbox/publish$", self._outbox_publish, Permission.KILLSWITCH_TOGGLE)
         add("POST", r"^/api/v1/killswitch$", self._killswitch_set, Permission.KILLSWITCH_TOGGLE)
 
     def handle(self, request: ApiRequest) -> ApiResponse:
@@ -689,6 +691,35 @@ class ApiApp:
             "verification": self.platform.audit.verify(),
         })
 
+    def _outbox_stats(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        """FIX-08-OUTBOX-API: آمار Outbox و مصرف."""
+        repo = self.platform.outbox_repo
+        pending = repo.pending(limit=10000)
+        dead = repo.dead_letters(limit=10000)
+        total_row = self.platform.db.scalar("SELECT COUNT(*) FROM outbox") or 0
+        published_row = self.platform.db.scalar(
+            "SELECT COUNT(*) FROM outbox WHERE published_at IS NOT NULL") or 0
+        return self._json(200, {
+            "pending_count": len(pending),
+            "dead_letter_count": len(dead),
+            "total": int(total_row),
+            "published_count": int(published_row),
+            "consumer": self.platform.outbox_stats.snapshot(),
+        })
+
+    def _outbox_publish(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        """FIX-08-OUTBOX-API: پردازش pending events توسط consumerها."""
+        body = request.json()
+        limit = int(body.get("limit", 100))
+        limit = max(1, min(1000, limit))
+        stats = self.platform.outbox.publish_pending(
+            self.platform.outbox_handlers, limit=limit,
+        )
+        return self._json(200, {
+            "stats": stats,
+            "consumer": self.platform.outbox_stats.snapshot(),
+        })
+
     def _killswitch_get(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         return self._json(200, {"killswitch": self.platform.killswitch.status()})
 
@@ -816,3 +847,5 @@ def serve(platform: Platform, host: str | None = None, port: int | None = None) 
     finally:
         server.server_close()
 # FIX-08-RATE-LIMIT
+
+# FIX-08-OUTBOX-API

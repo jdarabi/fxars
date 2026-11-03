@@ -147,6 +147,11 @@ class Platform:
             broker=PaperBroker() if self.settings.execution_enabled else None,
         )
 
+        # FIX-08-OUTBOX-CONSUMER: ثبت consumerهای پیش‌فرض
+        from fxars.audit.handlers import ConsumerStats, default_handlers
+        self.outbox_stats = ConsumerStats()
+        self.outbox_handlers = default_handlers(stats=self.outbox_stats)
+
     # ------------------------------------------------------------------ راه‌اندازی
     def bootstrap(self, *, admin_password: str | None = None, analyst_password: str | None = None,
                   create_users: bool = True) -> dict[str, Any]:
