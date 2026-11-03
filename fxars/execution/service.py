@@ -50,8 +50,14 @@ class ExecutionService:
     def phase(self) -> Phase:
         return self.settings.phase
 
-    def create_intent(self, scenario_id: str, *, client_order_id: str | None = None,
-                      actor: str = "system") -> OrderIntent:
+    # ------------------------------------------------------------------
+    def create_intent(
+        self,
+        scenario_id: str,
+        *,
+        client_order_id: str | None = None,
+        actor: str = "system",
+    ) -> OrderIntent:
         if not self.settings.execution_enabled:
             self.audit.append(
                 AuditAction.ORDER_INTENT_BLOCKED, "scenario", scenario_id, actor=actor,
@@ -62,6 +68,7 @@ class ExecutionService:
                 details={"phase": self.phase.value},
             )
         self.killswitch.assert_inactive()
+
         scenario = self.scenarios.get(scenario_id)
         if scenario.risk_decision_id is None:
             raise RiskRejectedError("سناریو RiskDecision تأییدشده ندارد.")
@@ -70,15 +77,27 @@ class ExecutionService:
         if not decision.approved or decision.valid_until <= now:
             raise RiskRejectedError(
                 "RiskDecision منقضی یا رد شده است.",
-                details={"decision_id": decision.decision_id, "reason": decision.reason_code.value},
+                details={
+                    "decision_id": decision.decision_id,
+                    "reason": decision.reason_code.value,
+                },
             )
-        identifier = client_order_id or f"fxars-{scenario.instrument_id.lower()}-{now.strftime('%Y%m%d%H%M%S')}-{new_id('', 4)}"
+
+        identifier = client_order_id or (
+            f"fxars-{scenario.instrument_id.lower()}-"
+            f"{now.strftime('%Y%m%d%H%M%S')}-{new_id('', 4)}"
+        )
         existing = self.orders.find_by_client_id(identifier)
         if existing is not None:
             return existing
+
         side = Side.BUY if scenario.direction.value == "LONG" else Side.SELL
         targets = scenario.target_logic
-        take_profit = Decimal(targets[0]["price"]) if targets and targets[0].get("price") else None
+        take_profit = (
+            Decimal(targets[0]["price"])
+            if targets and targets[0].get("price")
+            else None
+        )
         intent = OrderIntent(
             intent_id=stable_id("oi", identifier, length=20),
             client_order_id=identifier,
@@ -103,46 +122,60 @@ class ExecutionService:
             )
             self.outbox.emit(
                 EventType.ORDER_INTENT_CREATED,
-                {"intent_id": intent.intent_id, "client_order_id": identifier,
-                 "volume": str(intent.volume), "side": side.value},
+                {
+                    "intent_id": intent.intent_id,
+                    "client_order_id": identifier,
+                    "volume": str(intent.volume),
+                    "side": side.value,
+                },
                 occurred_at=now,
             )
         return intent
 
-    def submit(self, intent_id: str, *, price: Decimal, pip_size: Decimal, actor: str = "system") -> OrderIntent:
+    # ------------------------------------------------------------------
+    def submit(
+        self,
+        intent_id: str,
+        *,
+        price: Decimal,
+        pip_size: Decimal,
+        actor: str = "system",
+    ) -> OrderIntent:
         if self.phase is Phase.READ_ONLY:
             raise PhaseViolationError("ارسال سفارش در فاز Read-only ممنوع است.")
         self.killswitch.assert_inactive()
-        self.killswitch.assert_inactive()
-        self.killswitch.assert_inactive()
+
         intent = self.orders.get_intent(intent_id)
         if intent is None:
             raise ValidationError("OrderIntent یافت نشد.")
+
+        # FIX-P0-4: re-check decision TTL at submission time
         decision = self.decisions.get(intent.risk_decision_id)
         now = self.clock()
         if not decision.approved or decision.valid_until <= now:
             raise RiskRejectedError(
                 "RiskDecision expired or rejected at submission time.",
-                details={"decision_id": decision.decision_id,
-                         "reason": decision.reason_code.value,
-                         "valid_until": decision.valid_until.isoformat()},
+                details={
+                    "decision_id": decision.decision_id,
+                    "reason": decision.reason_code.value,
+                    "valid_until": decision.valid_until.isoformat(),
+                },
             )
-        decision = self.decisions.get(intent.risk_decision_id)
-        now = self.clock()
-        if not decision.approved or decision.valid_until <= now:
-            raise RiskRejectedError(
-                "RiskDecision expired or rejected at submission time.",
-                details={"decision_id": decision.decision_id,
-                         "reason": decision.reason_code.value,
-                         "valid_until": decision.valid_until.isoformat()},
-            )
+
         if self.broker is None:
             raise ValidationError("آداپتر بروکر پیکربندی نشده است.")
+
         intent = transition(intent, OrderStatus.SUBMITTED)
-        broker_order, fills = self.broker.submit(intent, price=price, pip_size=pip_size)
-        target = OrderStatus.FILLED if broker_order.status is OrderStatus.FILLED else OrderStatus.PARTIALLY_FILLED
+        broker_order, fills = self.broker.submit(
+            intent, price=price, pip_size=pip_size,
+        )
+
+        # FIX-P6-5: honor broker's actual status
+        # (FILLED, PARTIALLY_FILLED, UNKNOWN, REJECTED, CANCELED, EXPIRED)
+        target = broker_order.status
         intent = transition(intent, OrderStatus.ACKNOWLEDGED)
         intent = transition(intent, target)
+
         with self.orders.db.transaction():
             self.orders.save_intent(intent)
             self.orders.save_broker_order(broker_order)
@@ -150,6 +183,10 @@ class ExecutionService:
                 self.orders.save_fill(fill)
             self.audit.append(
                 "ORDER_SUBMITTED", "order_intent", intent.intent_id, actor=actor,
-                payload={"broker_order_id": broker_order.broker_order_id, "status": target.value},
+                payload={
+                    "broker_order_id": broker_order.broker_order_id,
+                    "status": target.value,
+                    "fills": len(fills),
+                },
             )
         return intent
