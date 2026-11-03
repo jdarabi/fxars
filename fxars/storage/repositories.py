@@ -900,6 +900,27 @@ class IdempotencyRepository:
             (key, user_id),
         )
 
+    # FIX-12-CLEANUP
+    def delete_older_than(self, cutoff: datetime) -> int:
+        cur = self.db.execute(
+            "DELETE FROM idempotency_keys WHERE created_at < ?",
+            (format_ts(cutoff),),
+        )
+        return int(cur.rowcount or 0)
+
+    def stats(self) -> dict[str, object]:
+        total = int(self.db.scalar("SELECT COUNT(*) FROM idempotency_keys") or 0)
+        rows = self.db.query(
+            "SELECT state, COUNT(*) AS n FROM idempotency_keys GROUP BY state"
+        )
+        by_state = {row["state"]: int(row["n"]) for row in rows}
+        return {
+            "total": total,
+            "by_state": by_state,
+            "oldest": self.db.scalar("SELECT MIN(created_at) FROM idempotency_keys"),
+            "newest": self.db.scalar("SELECT MAX(created_at) FROM idempotency_keys"),
+        }
+
 
 class AccountRepository:
     def __init__(self, db: Database) -> None:

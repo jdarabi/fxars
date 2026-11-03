@@ -71,7 +71,12 @@ class Platform:
     ) -> None:
         self.settings = settings or Settings.load()
         self.clock = clock or utcnow
-        self.db = db or Database(self.settings.db_path)
+        if db is not None:
+            self.db = db
+        else:
+            # FIX-10-PG: انتخاب backend از settings (sqlite | postgres)
+            from fxars.storage.factory import create_database
+            self.db = create_database(self.settings)
         self.db.migrate()
         self.calendar = calendar or TradingCalendar(default_holidays())
 

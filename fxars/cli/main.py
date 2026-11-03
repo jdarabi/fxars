@@ -415,6 +415,130 @@ def cmd_ac(args: argparse.Namespace) -> None:
     raise SystemExit(0 if result.wasSuccessful() else 1)
 
 
+def cmd_migrate_postgres(args: argparse.Namespace) -> None:
+    """FIX-10-PG: اعمال schema روی Postgres و انتقال اختیاری داده از SQLite."""
+    from fxars.storage.factory import create_database
+    settings = Settings.load(getattr(args, "config", None))
+    if args.dsn:
+        settings = replace(settings, database=replace(settings.database, postgres_dsn=args.dsn))
+    try:
+        pg = create_database(settings, force_backend="postgres")
+    except Exception as exc:
+        print(f"خطا: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    try:
+        print("Postgres schema applied.")
+        print(f"  current_version = {pg.scalar('SELECT COALESCE(MAX(version),0) FROM schema_migrations')}")
+        if args.with_data:
+            tables = args.tables or None
+            copied = _copy_sqlite_to_postgres(settings, pg, tables=tables, dry_run=args.dry_run)
+            print(f"داده‌های منتقل‌شده: {copied}")
+    finally:
+        pg.close()
+
+
+def _copy_sqlite_to_postgres(settings, pg, *, tables=None, dry_run=False) -> dict[str, int]:
+    """کپی داده از SQLite به Postgres با INSERT ... ON CONFLICT DO NOTHING."""
+    from fxars.storage.db import Database
+    sqlite = Database(settings.db_path)
+    try:
+        existing = {row["name"] for row in pg.query(
+            "SELECT table_name AS name FROM information_schema.tables WHERE table_schema='public'"
+        )}
+        all_tables = [row["name"] for row in sqlite.query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_migrations'"
+        )]
+        targets = tables or all_tables
+        result: dict[str, int] = {}
+        for table in targets:
+            if table not in existing:
+                result[table] = 0
+                continue
+            cols = [r["name"] for r in sqlite.query(f"PRAGMA table_info({table})")]
+            if not cols:
+                result[table] = 0
+                continue
+            rows = sqlite.query(f"SELECT * FROM {table}")
+            if not rows:
+                result[table] = 0
+                continue
+            placeholders = ", ".join(["%s"] * len(cols))
+            col_list = ", ".join(cols)
+            sql = f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) ON CONFLICT DO NOTHING"
+            payload = [tuple(row[c] if not isinstance(row[c], (dict, list)) else __import__("json").dumps(row[c]) for c in cols) for row in rows]
+            if dry_run:
+                result[table] = len(payload)
+                continue
+            with pg.transaction():
+                cur = pg.executemany(sql, payload)
+                result[table] = cur.rowcount if cur.rowcount is not None else len(payload)
+        return result
+    finally:
+        sqlite.close()
+
+
+def cmd_migrate_postgres(args: argparse.Namespace) -> None:
+    """FIX-10-PG: اعمال schema روی Postgres و انتقال اختیاری داده از SQLite."""
+    from fxars.storage.factory import create_database
+    settings = Settings.load(getattr(args, "config", None))
+    if args.dsn:
+        settings = replace(settings, database=replace(settings.database, postgres_dsn=args.dsn))
+    try:
+        pg = create_database(settings, force_backend="postgres")
+    except Exception as exc:
+        print(f"خطا: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    try:
+        print("Postgres schema applied.")
+        print(f"  current_version = {pg.scalar('SELECT COALESCE(MAX(version),0) FROM schema_migrations')}")
+        if args.with_data:
+            tables = args.tables or None
+            copied = _copy_sqlite_to_postgres(settings, pg, tables=tables, dry_run=args.dry_run)
+            print(f"داده‌های منتقل‌شده: {copied}")
+    finally:
+        pg.close()
+
+
+def _copy_sqlite_to_postgres(settings, pg, *, tables=None, dry_run=False) -> dict[str, int]:
+    """کپی داده از SQLite به Postgres با INSERT ... ON CONFLICT DO NOTHING."""
+    from fxars.storage.db import Database
+    sqlite = Database(settings.db_path)
+    try:
+        existing = {row["name"] for row in pg.query(
+            "SELECT table_name AS name FROM information_schema.tables WHERE table_schema='public'"
+        )}
+        all_tables = [row["name"] for row in sqlite.query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_migrations'"
+        )]
+        targets = tables or all_tables
+        result: dict[str, int] = {}
+        for table in targets:
+            if table not in existing:
+                result[table] = 0
+                continue
+            cols = [r["name"] for r in sqlite.query(f"PRAGMA table_info({table})")]
+            if not cols:
+                result[table] = 0
+                continue
+            rows = sqlite.query(f"SELECT * FROM {table}")
+            if not rows:
+                result[table] = 0
+                continue
+            placeholders = ", ".join(["%s"] * len(cols))
+            col_list = ", ".join(cols)
+            sql = f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) ON CONFLICT DO NOTHING"
+            payload = [tuple(row[c] if not isinstance(row[c], (dict, list)) else __import__("json").dumps(row[c]) for c in cols) for row in rows]
+            if dry_run:
+                result[table] = len(payload)
+                continue
+            with pg.transaction():
+                cur = pg.executemany(sql, payload)
+                result[table] = cur.rowcount if cur.rowcount is not None else len(payload)
+        return result
+    finally:
+        sqlite.close()
+
+
 def cmd_selftest(args: argparse.Namespace) -> None:
     import unittest
 
@@ -553,6 +677,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     selftest = sub.add_parser("selftest", help="اجرای کل آزمون‌ها")
     selftest.set_defaults(func=cmd_selftest)
+
+    mp = sub.add_parser("migrate-postgres", parents=[common], help="اعمال schema روی Postgres + انتقال داده")
+    mp.add_argument("--dsn", help="override postgres_dsn")
+    mp.add_argument("--with-data", action="store_true", help="کپی داده از SQLite")
+    mp.add_argument("--tables", nargs="*", help="فهرست جداول برای کپی")
+    mp.add_argument("--dry-run", action="store_true")
+    mp.set_defaults(func=cmd_migrate_postgres)
 
     meta = sub.add_parser("modules", help="مشخصات ماژول‌های تحلیل")
     meta.set_defaults(func=cmd_meta)

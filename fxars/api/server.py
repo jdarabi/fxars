@@ -14,6 +14,11 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
 from fxars.api.metrics import get_registry
+from fxars.api.rate_limit import (
+    MemoryRateLimiter as RateLimiter,
+    RedisRateLimiter,
+    build_rate_limiter,
+)
 from fxars.api.metrics_dashboard import render_metrics_dashboard
 from fxars.api.openapi import docs_html, openapi_spec
 from fxars.core.context import correlation_scope, current_correlation_id
@@ -125,7 +130,7 @@ class ApiApp:
         self.platform = platform
         self.settings = platform.settings
         self.identity = platform.identity
-        self.limiter = RateLimiter(self.settings.api.rate_limit_per_minute, 60)
+        self.limiter = build_rate_limiter(self.settings)  # FIX-11-REDIS
         self.routes: list[tuple[str, re.Pattern[str], Callable[..., ApiResponse], Permission | None, bool]] = []
         self.metrics = get_registry()
         self._register()

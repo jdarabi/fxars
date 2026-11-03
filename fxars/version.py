@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DOCUMENT_ID = "FX-ARS-SRS-ARCH-002"
-CODE_VERSION = "1.4.11"
+CODE_VERSION = "1.4.12"
 CONTRACT_VERSION = "1.0.0"
 SCHEMA_VERSION = 1
 RULES_VERSION = "rules_v1.3.0"

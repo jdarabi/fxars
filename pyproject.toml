@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fxars"
-version = "1.4.11"
+version = "1.4.12"
 description = "FX Analysis, Risk & Decision Support System (FX-ARS-SRS-ARCH-002) - MVP-1 reference implementation"
 readme = "README.md"
 requires-python = ">=3.11"

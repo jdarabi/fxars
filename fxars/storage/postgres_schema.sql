@@ -1,5 +1,5 @@
--- FX-ARS schema for PostgreSQL (P4-3-ext)
--- Types: TIMESTAMPTZ for time, JSONB for payload, BIGSERIAL for seq.
+-- FX-ARS schema for PostgreSQL (FIX-10-PG)
+-- Types: TIMESTAMPTZ, JSONB, BIGSERIAL.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    INTEGER PRIMARY KEY,
@@ -20,6 +20,16 @@ CREATE TABLE IF NOT EXISTS data_sources (
     updated_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS symbol_mappings (
+    source_id      TEXT NOT NULL,
+    broker_symbol  TEXT NOT NULL,
+    instrument_id  TEXT NOT NULL,
+    valid_from     TIMESTAMPTZ NOT NULL,
+    valid_to       TIMESTAMPTZ,
+    payload        JSONB NOT NULL,
+    PRIMARY KEY (source_id, broker_symbol, valid_from)
+);
+
 CREATE TABLE IF NOT EXISTS candles (
     instrument_id  TEXT NOT NULL,
     source_id      TEXT NOT NULL,
@@ -35,6 +45,53 @@ CREATE TABLE IF NOT EXISTS candles (
 );
 CREATE INDEX IF NOT EXISTS idx_candles_range ON candles (instrument_id, timeframe, open_time);
 CREATE INDEX IF NOT EXISTS idx_candles_available ON candles (instrument_id, timeframe, available_at);
+
+CREATE TABLE IF NOT EXISTS candle_revision_log (
+    id             BIGSERIAL PRIMARY KEY,
+    instrument_id  TEXT NOT NULL,
+    source_id      TEXT NOT NULL,
+    timeframe      TEXT NOT NULL,
+    open_time      TIMESTAMPTZ NOT NULL,
+    old_revision   INTEGER NOT NULL,
+    new_revision   INTEGER NOT NULL,
+    old_digest     TEXT NOT NULL,
+    new_digest     TEXT NOT NULL,
+    reason         TEXT NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS candle_quarantine (
+    id             BIGSERIAL PRIMARY KEY,
+    instrument_id  TEXT NOT NULL,
+    source_id      TEXT NOT NULL,
+    timeframe      TEXT NOT NULL,
+    open_time      TIMESTAMPTZ NOT NULL,
+    reasons        TEXT NOT NULL,
+    payload        JSONB NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS raw_payloads (
+    payload_id    TEXT PRIMARY KEY,
+    source_id     TEXT NOT NULL,
+    kind          TEXT NOT NULL,
+    content_hash  TEXT NOT NULL,
+    received_at   TIMESTAMPTZ NOT NULL,
+    payload       TEXT NOT NULL,
+    meta          JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS economic_events (
+    event_id      TEXT NOT NULL,
+    revision      INTEGER NOT NULL DEFAULT 1,
+    currency      TEXT NOT NULL,
+    event_time    TIMESTAMPTZ NOT NULL,
+    available_at  TIMESTAMPTZ NOT NULL,
+    importance    TEXT NOT NULL,
+    payload       JSONB NOT NULL,
+    PRIMARY KEY (event_id, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_events_time ON economic_events (event_time, currency);
 
 CREATE TABLE IF NOT EXISTS analysis_runs (
     run_id            TEXT PRIMARY KEY,
@@ -55,10 +112,11 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
     data_quality      JSONB NOT NULL,
     error             TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_analysis_instrument ON analysis_runs (instrument_id, timeframe, as_of);
 
 CREATE TABLE IF NOT EXISTS evidences (
     evidence_id    TEXT PRIMARY KEY,
-    run_id         TEXT NOT NULL,
+    run_id         TEXT NOT NULL REFERENCES analysis_runs(run_id) ON DELETE CASCADE,
     module_id      TEXT NOT NULL,
     family         TEXT NOT NULL,
     observed_at    TIMESTAMPTZ NOT NULL,
@@ -67,6 +125,7 @@ CREATE TABLE IF NOT EXISTS evidences (
     strength       DOUBLE PRECISION NOT NULL,
     payload        JSONB NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_evidences_run ON evidences (run_id, family);
 
 CREATE TABLE IF NOT EXISTS scenarios (
     scenario_id      TEXT PRIMARY KEY,
@@ -81,6 +140,22 @@ CREATE TABLE IF NOT EXISTS scenarios (
     analysis_run_id  TEXT NOT NULL,
     payload          JSONB NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_scenarios_status ON scenarios (status, instrument_id);
+
+CREATE TABLE IF NOT EXISTS scenario_transitions (
+    transition_id  TEXT PRIMARY KEY,
+    scenario_id    TEXT NOT NULL,
+    from_status    TEXT NOT NULL,
+    to_status      TEXT NOT NULL,
+    event          TEXT NOT NULL,
+    actor          TEXT NOT NULL,
+    reason         TEXT NOT NULL,
+    occurred_at    TIMESTAMPTZ NOT NULL,
+    rules_version  TEXT NOT NULL,
+    data_ref       TEXT NOT NULL,
+    correlation_id TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_transitions_scenario ON scenario_transitions (scenario_id, occurred_at);
 
 CREATE TABLE IF NOT EXISTS risk_decisions (
     decision_id    TEXT PRIMARY KEY,
@@ -93,6 +168,32 @@ CREATE TABLE IF NOT EXISTS risk_decisions (
     valid_until    TIMESTAMPTZ NOT NULL,
     payload        JSONB NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_risk_scenario ON risk_decisions (scenario_id, created_at);
+
+CREATE TABLE IF NOT EXISTS data_quality_runs (
+    run_id        TEXT PRIMARY KEY,
+    instrument_id TEXT NOT NULL,
+    timeframe     TEXT NOT NULL,
+    source_id     TEXT NOT NULL,
+    checked_at    TIMESTAMPTZ NOT NULL,
+    verdict       TEXT NOT NULL,
+    stale         BOOLEAN NOT NULL,
+    payload       JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dq_checked ON data_quality_runs (instrument_id, checked_at);
+
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    run_id           TEXT PRIMARY KEY,
+    instrument_id    TEXT NOT NULL,
+    timeframe        TEXT NOT NULL,
+    segment          TEXT NOT NULL,
+    config_hash      TEXT NOT NULL,
+    data_snapshot_id TEXT NOT NULL,
+    started_at       TIMESTAMPTZ NOT NULL,
+    finished_at      TIMESTAMPTZ NOT NULL,
+    payload          JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_backtests_started ON backtest_runs (started_at);
 
 CREATE TABLE IF NOT EXISTS audit_events (
     seq            BIGSERIAL PRIMARY KEY,
@@ -115,14 +216,25 @@ CREATE TABLE IF NOT EXISTS outbox (
     occurred_at    TIMESTAMPTZ NOT NULL,
     correlation_id TEXT NOT NULL,
     payload        JSONB NOT NULL,
-    published_at   TIMESTAMPTZ
+    published_at   TIMESTAMPTZ,
+    attempts       INTEGER NOT NULL DEFAULT 0,
+    last_error     TEXT,
+    dead_letter_at TIMESTAMPTZ
 );
+CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox (published_at, occurred_at);
 
 CREATE TABLE IF NOT EXISTS outbox_consumed (
     consumer    TEXT NOT NULL,
     event_id    TEXT NOT NULL,
     consumed_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (consumer, event_id)
+);
+
+CREATE TABLE IF NOT EXISTS system_state (
+    key        TEXT PRIMARY KEY,
+    value      JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    updated_by TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -145,13 +257,73 @@ CREATE TABLE IF NOT EXISTS sessions (
     ip         TEXT NOT NULL,
     revoked    BOOLEAN NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id, expires_at);
 
-CREATE TABLE IF NOT EXISTS system_state (
-    key        TEXT PRIMARY KEY,
-    value      JSONB NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL,
-    updated_by TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id           BIGSERIAL PRIMARY KEY,
+    username     TEXT NOT NULL,
+    ip           TEXT NOT NULL,
+    attempted_at TIMESTAMPTZ NOT NULL,
+    success      BOOLEAN NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_attempts ON login_attempts (username, attempted_at);
+
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    key          TEXT NOT NULL,
+    user_id      TEXT NOT NULL,
+    route        TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    status       INTEGER NOT NULL,
+    response     JSONB NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL,
+    state        TEXT NOT NULL DEFAULT 'completed',
+    PRIMARY KEY (key, user_id)
 );
 
--- Additional tables matching SQLite schema are added incrementally.
--- The full list is in schema.sql; this file covers the core for parity tests.
+CREATE TABLE IF NOT EXISTS account_snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    account_id  TEXT NOT NULL,
+    taken_at    TIMESTAMPTZ NOT NULL,
+    payload     JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS order_intents (
+    intent_id        TEXT PRIMARY KEY,
+    client_order_id  TEXT NOT NULL UNIQUE,
+    risk_decision_id TEXT NOT NULL,
+    instrument_id    TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL,
+    payload          JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS broker_orders (
+    broker_order_id TEXT PRIMARY KEY,
+    intent_id       TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    updated_at      TIMESTAMPTZ NOT NULL,
+    payload         JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS fills (
+    fill_id         TEXT PRIMARY KEY,
+    broker_order_id TEXT NOT NULL,
+    filled_at       TIMESTAMPTZ NOT NULL,
+    payload         JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS model_registry (
+    model_id TEXT NOT NULL,
+    version  TEXT NOT NULL,
+    status   TEXT NOT NULL,
+    payload  JSONB NOT NULL,
+    PRIMARY KEY (model_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS locked_test_access (
+    access_id TEXT PRIMARY KEY,
+    run_id    TEXT NOT NULL,
+    opened_at TIMESTAMPTZ NOT NULL,
+    actor     TEXT NOT NULL,
+    purpose   TEXT NOT NULL
+);

@@ -1,3 +1,12 @@
+## [v1.4.12] — 1405-08-12
+
+### Added (Infrastructure)
+- FIX-10-PG: real PostgreSQL backend (factory + schema + migrations + CLI)
+- FIX-11-REDIS: Redis rate limit backend
+- FIX-12-CLEANUP: idempotency cleanup job
+
+---
+
 # Changelog — FX-ARS
 
 ## [v1.4.11] — 2026-11-03

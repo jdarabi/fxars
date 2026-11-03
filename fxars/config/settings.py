@@ -1,8 +1,4 @@
-"""پیکربندی نسخه‌دار سامانه.
-
-همه پارامترهای مؤثر بر تصمیم (ریسک، تحلیل، کیفیت داده) بخشی از config_hash هستند
-تا هر خروجی قابل ردیابی و بازتولید باشد (اصل Version Everything).
-"""
+"""پیکربندی نسخه‌دار سامانه."""
 
 from __future__ import annotations
 
@@ -24,6 +20,26 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "settings.json"
 
 def _dec(value: Any, default: str = "0") -> Decimal:
     return to_decimal(value if value is not None else default)
+
+
+@dataclass(frozen=True)
+class DatabaseSettings:
+    backend: str = "sqlite"
+    postgres_dsn: str = ""
+    postgres_connect_timeout: int = 10
+    postgres_statement_timeout_ms: int = 30000
+    postgres_application_name: str = "fxars"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DatabaseSettings":
+        data = data or {}
+        return cls(
+            backend=str(data.get("backend", "sqlite")),
+            postgres_dsn=str(data.get("postgres_dsn", "")),
+            postgres_connect_timeout=int(data.get("postgres_connect_timeout", 10)),
+            postgres_statement_timeout_ms=int(data.get("postgres_statement_timeout_ms", 30000)),
+            postgres_application_name=str(data.get("postgres_application_name", "fxars")),
+        )
 
 
 @dataclass(frozen=True)
@@ -124,18 +140,18 @@ class AnalysisSettings:
     intermarket_min_correlation: float = 0.35
     intermarket_window: int = 60
     stop_buffer_pips: Decimal = Decimal("5")
-    rr_targets: tuple[Decimal, ...] = (Decimal("1.5"), Decimal("3.0"))
+    rr_targets: tuple = (Decimal("1.5"), Decimal("3.0"))
     scenario_expiry_bars: int = 8
-    weights: dict[str, float] = field(default_factory=dict)
-    intermarket_refs: dict[str, list[str]] = field(
+    weights: dict = field(default_factory=dict)
+    intermarket_refs: dict = field(
         default_factory=lambda: {"EURUSD": ["DXY"], "GBPUSD": ["DXY"], "XAUUSD": ["DXY"]}
     )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "AnalysisSettings":
+    def from_dict(cls, data: dict) -> "AnalysisSettings":
         data = data or {}
         base = cls()
-        values: dict[str, Any] = {}
+        values = {}
         for item in fields(cls):
             if item.name not in data:
                 continue
@@ -152,7 +168,7 @@ class AnalysisSettings:
             values[item.name] = value
         return cls(**values)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict:
         from fxars.core.serde import jsonable
 
         return jsonable(self)
@@ -169,7 +185,7 @@ class DataQualitySettings:
     require_available_at: bool = True
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DataQualitySettings":
+    def from_dict(cls, data: dict) -> "DataQualitySettings":
         data = data or {}
         return cls(
             max_bar_age_bars=float(data.get("max_bar_age_bars", 1.5)),
@@ -181,7 +197,7 @@ class DataQualitySettings:
             require_available_at=bool(data.get("require_available_at", True)),
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict:
         from fxars.core.serde import jsonable
 
         return jsonable(self)
@@ -198,9 +214,12 @@ class ApiSettings:
     page_size_max: int = 500
     session_ttl_minutes: int = 480
     cors_allow_origin: str = ""
+    rate_limit_backend: str = "memory"
+    redis_url: str = "redis://127.0.0.1:6379/0"
+    rate_limit_prefix: str = "fxars:rl:"
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ApiSettings":
+    def from_dict(cls, data: dict) -> "ApiSettings":
         data = data or {}
         return cls(
             host=str(data.get("host", "127.0.0.1")),
@@ -212,6 +231,9 @@ class ApiSettings:
             page_size_max=int(data.get("page_size_max", 500)),
             session_ttl_minutes=int(data.get("session_ttl_minutes", 480)),
             cors_allow_origin=str(data.get("cors_allow_origin", "")),
+            rate_limit_backend=str(data.get("rate_limit_backend", "memory")),
+            redis_url=str(data.get("redis_url", "redis://127.0.0.1:6379/0")),
+            rate_limit_prefix=str(data.get("rate_limit_prefix", "fxars:rl:")),
         )
 
 
@@ -221,11 +243,11 @@ class SecuritySettings:
     secret_key: str = "dev-insecure-secret-change-me"
     login_max_attempts: int = 8
     login_window_seconds: int = 300
-    mfa_roles: tuple[Role, ...] = (Role.ADMIN, Role.RISK_MANAGER, Role.OPERATOR)
+    mfa_roles: tuple = (Role.ADMIN, Role.RISK_MANAGER, Role.OPERATOR)
     session_token_bytes: int = 32
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SecuritySettings":
+    def from_dict(cls, data: dict) -> "SecuritySettings":
         data = data or {}
         roles = data.get("mfa_roles", ["ADMIN", "RISK_MANAGER", "OPERATOR"])
         return cls(
@@ -247,7 +269,7 @@ class BacktestSettings:
     commission_per_lot: Decimal = Decimal("7.0")
     swap_per_lot_per_night: Decimal = Decimal("-2.5")
     stop_buffer_pips: Decimal = Decimal("5")
-    target_r_multiples: tuple[Decimal, ...] = (Decimal("1.5"), Decimal("3.0"))
+    target_r_multiples: tuple = (Decimal("1.5"), Decimal("3.0"))
     partial_close_fraction: Decimal = Decimal("0.5")
     breakeven_after_tp1: bool = True
     max_bars_in_trade: int = 24
@@ -261,11 +283,10 @@ class BacktestSettings:
     walkforward_test_bars: int = 200
     walkforward_step_bars: int = 200
     monte_carlo_runs: int = 200
-    # P3-4-ext3: regime filter (empty = allow all)
-    allowed_regimes: tuple[str, ...] = ()
+    allowed_regimes: tuple = ()
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BacktestSettings":
+    def from_dict(cls, data: dict) -> "BacktestSettings":
         data = data or {}
         targets = data.get("target_r_multiples", [1.5, 3.0])
         return cls(
@@ -293,7 +314,7 @@ class BacktestSettings:
             allowed_regimes=tuple(data.get("allowed_regimes", []) or ()),
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict:
         from fxars.core.serde import jsonable
 
         return jsonable(self)
@@ -316,13 +337,13 @@ class Settings:
     security: SecuritySettings = field(default_factory=SecuritySettings)
     backtest: BacktestSettings = field(default_factory=BacktestSettings)
     display_timezone: str = "Asia/Tehran"
+    database: DatabaseSettings = field(default_factory=DatabaseSettings)
 
     @property
     def execution_enabled(self) -> bool:
         return self.phase.allows_order_intents
 
     def config_hash(self) -> str:
-        """هش پارامترهای مؤثر بر تحلیل/ریسک (بدون مسیرها و پورت)."""
         return sha256_obj(
             {
                 "code_version": self.code_version,
@@ -335,7 +356,7 @@ class Settings:
             }
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict:
         from fxars.core.serde import jsonable
 
         data = jsonable(self)
@@ -345,7 +366,7 @@ class Settings:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Settings":
+    def from_dict(cls, data: dict) -> "Settings":
         data = data or {}
         return cls(
             environment=str(data.get("environment", "dev")),
@@ -363,17 +384,13 @@ class Settings:
             security=SecuritySettings.from_dict(data.get("security", {})),
             backtest=BacktestSettings.from_dict(data.get("backtest", {})),
             display_timezone=str(data.get("display_timezone", "Asia/Tehran")),
+            database=DatabaseSettings.from_dict(data.get("database", {})),
         )
 
     @classmethod
-    def load(cls, path: str | Path | None = None) -> "Settings":
-        """بارگذاری از فایل JSON (اختیاری) + بازنویسی متغیرهای محیطی.
-
-        FIX-03-HARDEN-SECRET: در محیط prod، secret_key پیش‌فرض یا کوتاه
-        باعث fail-fast در startup می‌شود.
-        """
+    def load(cls, path=None):
         config_path = Path(path) if path else Path(os.environ.get("FXARS_CONFIG", DEFAULT_CONFIG_PATH))
-        data: dict[str, Any] = {}
+        data = {}
         if config_path.exists():
             with open(config_path, encoding="utf-8") as handle:
                 data = json.load(handle)
@@ -389,15 +406,16 @@ class Settings:
             data.setdefault("api", {})["port"] = int(os.environ["FXARS_API_PORT"])
         if os.environ.get("FXARS_API_HOST"):
             data.setdefault("api", {})["host"] = os.environ["FXARS_API_HOST"]
+        if os.environ.get("FXARS_DB_BACKEND"):
+            data.setdefault("database", {})["backend"] = os.environ["FXARS_DB_BACKEND"]
+        if os.environ.get("FXARS_POSTGRES_DSN"):
+            data.setdefault("database", {})["postgres_dsn"] = os.environ["FXARS_POSTGRES_DSN"]
         settings = cls.from_dict(data)
-        # FIX-03-HARDEN-SECRET: در prod، secret_key ضعیف/پیش‌فرض مجاز نیست
         if settings.environment == "prod":
             insecure = {"dev-insecure-secret-change-me", "", "change-me", "secret"}
             key = settings.security.secret_key
             if key in insecure or len(key) < 32:
                 raise ValueError(
-                    "secret_key نامعتبر در محیط prod: باید حداقل ۳۲ کاراکتر تصادفی "
-                    "و متفاوت از مقدار پیش‌فرض باشد. "
-                    "این مقدار را از FXARS_SECRET_KEY یا config/security.secret_key تنظیم کنید."
+                    "secret_key نامعتبر در محیط prod: باید حداقل ۳۲ کاراکتر تصادفی باشد."
                 )
         return settings
