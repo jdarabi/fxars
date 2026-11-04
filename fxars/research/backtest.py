@@ -231,6 +231,10 @@ class BacktestEngine:
         # فعلاً فقط indicators را precompute می‌کنیم.
         self._precomputed_structure_per_bar = None  # فعلاً پیاده نشده
 
+        # P1a: precompute swings once on full series
+        from fxars.analysis.structure import find_swings
+        self._precomputed_swings = find_swings(list(candles), self.analysis.swing_k)
+
     def simulate(
         self,
         candles: Sequence[Candle],
@@ -442,7 +446,11 @@ class BacktestEngine:
             if window:
                 # swingهای معتبر با تأیید در پنجره فعلی
                 from fxars.analysis.structure import find_swings
-                swings = find_swings(window, self.analysis.swing_k)
+                # P1a: use cached swings
+                if getattr(self, '_precomputed_swings', None) is not None:
+                    swings = [s for s in self._precomputed_swings if s.confirmed_index <= index]
+                else:
+                    swings = find_swings(window, self.analysis.swing_k)
                 # فقط swingهایی که confirmed_index + swing_k <= len(window) - 1
                 # find_swings خودش این را بررسی می‌کند
                 if swings:
