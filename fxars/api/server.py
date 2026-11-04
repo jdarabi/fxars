@@ -745,7 +745,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        cors = getattr(self.server.app.settings.api, 'cors_allow_origin', '')  # type: ignore[attr-defined]
+        if cors:
+            self.send_header('Access-Control-Allow-Origin', cors)
+        else:
+            self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE, PUT, PATCH, HEAD")
         self.end_headers()
