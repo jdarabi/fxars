@@ -164,7 +164,7 @@ class VolumeModule:
     def compute(self, context: AnalysisContext, factory: EvidenceFactory) -> list[Evidence]:
         settings = context.settings
         evidences: list[Evidence] = []
-        window = 20
+        window = settings.vol_window
         recent: list[float] = []
         total = 0.0
         total_sq = 0.0
