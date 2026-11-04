@@ -477,28 +477,6 @@ def _copy_sqlite_to_postgres(settings, pg, *, tables=None, dry_run=False) -> dic
         sqlite.close()
 
 
-def cmd_migrate_postgres(args: argparse.Namespace) -> None:
-    """FIX-10-PG: اعمال schema روی Postgres و انتقال اختیاری داده از SQLite."""
-    from fxars.storage.factory import create_database
-    settings = Settings.load(getattr(args, "config", None))
-    if args.dsn:
-        settings = replace(settings, database=replace(settings.database, postgres_dsn=args.dsn))
-    try:
-        pg = create_database(settings, force_backend="postgres")
-    except Exception as exc:
-        print(f"خطا: {exc}", file=sys.stderr)
-        raise SystemExit(2)
-    try:
-        print("Postgres schema applied.")
-        print(f"  current_version = {pg.scalar('SELECT COALESCE(MAX(version),0) FROM schema_migrations')}")
-        if args.with_data:
-            tables = args.tables or None
-            copied = _copy_sqlite_to_postgres(settings, pg, tables=tables, dry_run=args.dry_run)
-            print(f"داده‌های منتقل‌شده: {copied}")
-    finally:
-        pg.close()
-
-
 def _copy_sqlite_to_postgres(settings, pg, *, tables=None, dry_run=False) -> dict[str, int]:
     """کپی داده از SQLite به Postgres با INSERT ... ON CONFLICT DO NOTHING."""
     from fxars.storage.db import Database
@@ -672,6 +650,23 @@ def build_parser() -> argparse.ArgumentParser:
     outbox.add_argument("--limit", type=int, default=100)
     outbox.set_defaults(func=cmd_outbox)
 
+    live = sub.add_parser("live", parents=[common], help="حلقه تحلیل real-time + Telegram")
+    live.add_argument("--instrument", default=None, help="اگر نبود از config خوانده می‌شود")
+    live.add_argument("--timeframe", default="H1")
+    live.add_argument("--interval", type=int, default=60)
+    live.add_argument("--history", type=int, default=500)
+    live.add_argument("--source", default="mt5")
+    live.add_argument("--max-cycles", dest="max_cycles", type=int, default=None)
+    live.add_argument("--send-no-trade", dest="send_no_trade", action="store_true")
+    live.add_argument("--max-signals-per-hour", dest="max_signals_per_hour", type=int, default=3)
+    live.add_argument("--timeframes", default=None, help="M15,H1,H4 (با کاما)")
+    live.add_argument("--live-config", dest="live_config", default=None, help="مسیر config JSON")
+    live.add_argument("--schedule-mode", dest="schedule_mode", choices=["always", "offsets"], default=None)
+    live.add_argument("--schedule-minutes", dest="schedule_minutes", default=None, help="مثلاً 0,15,30,45")
+    live.add_argument("--schedule-hours", dest="schedule_hours", default=None, help="ساعت‌های UTC")
+    live.add_argument("--schedule-days", dest="schedule_days", default=None, help="Mon,Tue,...")
+    live.set_defaults(func=cmd_live_v2)
+
     ac = sub.add_parser("ac", help="اجرای آزمون‌های پذیرش")
     ac.set_defaults(func=cmd_ac)
 
@@ -703,7 +698,117 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+
+
+# FIX-08-OUTBOX-CLI
+
+
+# FIX-LIVE-HANDLER-V2: multi-TF + config
+def cmd_live_v2(args: argparse.Namespace) -> None:
+    """Real-time daemon with config + multi-TF."""
+    import logging
+    from fxars.live.daemon import LiveDaemon, LiveDaemonConfig
+    from fxars.live.mt5_feed import MT5Feed, MT5UnavailableError
+    from fxars.live.notifier import TelegramConfig, TelegramNotifier
+    from fxars.live.config import LiveConfig, ScheduleConfig
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    live_config = None
+    live_config_path = getattr(args, "live_config", None)
+    if live_config_path:
+        try:
+            live_config = LiveConfig.load(live_config_path)
+            print(f"Loaded config: {live_config_path}")
+        except Exception as exc:
+            print(f"config error: {exc}", file=sys.stderr)
+            raise SystemExit(2)
+
+    instrument = args.instrument or (live_config.instrument if live_config else "EURUSD")
+    if getattr(args, "timeframes", None):
+        timeframes = [t.strip().upper() for t in args.timeframes.split(",") if t.strip()]
+    elif live_config is not None:
+        timeframes = list(live_config.timeframes)
+    else:
+        timeframes = [args.timeframe or "H1"]
+    primary_tf = args.timeframe or (live_config.primary_timeframe if live_config else timeframes[0])
+    interval = args.interval or (live_config.interval_seconds if live_config else 60)
+    history = args.history or (live_config.history_bars if live_config else 500)
+    source = args.source or (live_config.source_id if live_config else "mt5")
+    send_no_trade = bool(args.send_no_trade or (live_config.send_no_trade if live_config else False))
+    max_signals = args.max_signals_per_hour or (live_config.max_signals_per_hour if live_config else 3)
+
+    schedule = None
+    if getattr(args, "schedule_mode", None):
+        schedule = ScheduleConfig(
+            mode=args.schedule_mode,
+            minute_offsets=[int(m.strip()) for m in (args.schedule_minutes or "0,15,30,45").split(",")],
+            active_hours_utc=[int(h.strip()) for h in (args.schedule_hours or ",".join(str(h) for h in range(24))).split(",")],
+            active_days=(args.schedule_days or "Mon,Tue,Wed,Thu,Fri").split(","),
+        )
+    elif live_config is not None:
+        schedule = live_config.schedule
+
+    platform = _platform(args)
+    feed = None
+    try:
+        try:
+            feed = MT5Feed(source_id=source)
+        except MT5UnavailableError as exc:
+            print(f"MT5 error: {exc}", file=sys.stderr)
+            raise SystemExit(2)
+
+        notifier = None
+        tg_cfg = TelegramConfig.from_env()
+        if tg_cfg is not None:
+            try:
+                notifier = TelegramNotifier(tg_cfg)
+                print(f"Telegram notifier ready (chat_id={tg_cfg.chat_id})")
+            except Exception as exc:
+                print(f"Telegram disabled: {exc}", file=sys.stderr)
+        else:
+            print("Telegram disabled (set FXARS_TELEGRAM_TOKEN + FXARS_TELEGRAM_CHAT_ID)", file=sys.stderr)
+
+        cfg = LiveDaemonConfig(
+            instrument_id=instrument,
+            timeframe=primary_tf,
+            timeframes=timeframes,
+            interval_seconds=int(interval),
+            history_bars=int(history),
+            source_id=source,
+            send_no_trade=send_no_trade,
+            max_signals_per_hour=int(max_signals),
+            schedule=schedule,
+        )
+        daemon = LiveDaemon(config=cfg, platform=platform, feed=feed, notifier=notifier)
+
+        import signal as _signal
+        def _handle_sigint(signum, frame):
+            daemon.stop()
+        try:
+            _signal.signal(_signal.SIGINT, _handle_sigint)
+        except Exception:
+            pass
+
+        print(f"Live daemon: {cfg.instrument_id} {timeframes} every {cfg.interval_seconds}s")
+        if schedule:
+            print(f"  schedule: mode={schedule.mode}, days={schedule.active_days}, "
+                  f"hours={schedule.active_hours_utc[:3]}..., minutes={schedule.minute_offsets}")
+        print("Press Ctrl+C to stop.")
+        daemon.run(max_cycles=args.max_cycles)
+        print(f"Stats: {daemon.stats.to_dict()}")
+    finally:
+        try:
+            if feed is not None:
+                feed.shutdown()
+        except Exception:
+            pass
+        platform.close()
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
 
-# FIX-08-OUTBOX-CLI

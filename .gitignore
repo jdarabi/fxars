@@ -1,29 +1,86 @@
-﻿__pycache__/
+# ============================================
+# Python
+# ============================================
+__pycache__/
 *.py[cod]
-*.egg-info/
+*$py.class
+*.so
+.Python
 build/
 dist/
+*.egg-info/
+.eggs/
+*.egg
+.installed.cfg
+
+# ============================================
+# Virtual envs
+# ============================================
 .venv/
 venv/
-*.db
-*.db-shm
-*.db-wal
-data/generated/
-data/tmp_tests/
-reports/
-.coverage
+env/
+ENV/
+
+# ============================================
+# Testing
+# ============================================
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.hypothesis/
+hypothesis-python/
 
-# Backups and temp files
-*.bak
-*.bak.*
+# ============================================
+# IDE / OS
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================
+# FX-ARS specific
+# ============================================
 .fix-backups/
-*.log
-apply-p0-p1-fixes.ps1
+.cleanup-backups/
+*.bak
+*.orig
 
-# Ignore generated test artifacts
-p0p1-tests.log
-full-suite.log
-test_results.log
-*.docx
-reports/benchmark-*/
+/debug_*.py
+/check_*.py
+/add_*.py
+/fix_*.py
+analysis.json
+bench.log
+*.log
+*.tmp
+
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/live/
+backup/
+
+reports/*.md
+reports/*.html
+!reports/.gitkeep
+
+config/settings.json
+config/live.json
+!config/settings.example.json
+!config/live.example.json
+
+.env
+*.pem
+*.key
+
+!**/.gitkeep

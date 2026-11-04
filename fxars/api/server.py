@@ -83,48 +83,6 @@ class ApiResponse:
     headers: dict[str, str] = field(default_factory=dict)
 
 
-class RateLimiter:
-    def __init__(self, limit: int, window_seconds: int = 60) -> None:
-        self.limit = limit
-        self.window = window_seconds
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
-        self._lock = threading.Lock()
-
-    def allow(self, key: str) -> bool:
-        now = time.monotonic()
-        with self._lock:
-            bucket = self._hits[key]
-            while bucket and now - bucket[0] > self.window:
-                bucket.popleft()
-            if len(bucket) >= self.limit:
-                return False
-            bucket.append(now)
-            return True
-
-    def hits_for(self, key: str) -> int:
-        """FIX-08: تعداد Hits معتبر فعلی یک کلید در پنجره."""
-        now = time.monotonic()
-        with self._lock:
-            bucket = self._hits.get(key)
-            if bucket is None:
-                return 0
-            while bucket and now - bucket[0] > self.window:
-                bucket.popleft()
-            return len(bucket)
-
-    def snapshot(self) -> dict[str, int]:
-        """FIX-08: عکس فوری از Bucketهای غیرخالی."""
-        now = time.monotonic()
-        with self._lock:
-            result: dict[str, int] = {}
-            for key, bucket in list(self._hits.items()):
-                while bucket and now - bucket[0] > self.window:
-                    bucket.popleft()
-                if bucket:
-                    result[key] = len(bucket)
-            return result
-
-
 class ApiApp:
     def __init__(self, platform: Platform) -> None:
         self.platform = platform

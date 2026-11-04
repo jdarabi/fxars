@@ -21,7 +21,7 @@ TIMEFRAME_MINUTES: Final[dict[str, int]] = {
 
 _ISO_RE = re.compile(
     r"^(?P<date>\d{4}-\d{2}-\d{2})[T ](?P<time>\d{2}:\d{2}(?::\d{2})?)(?:\.(?P<frac>\d{1,6}))?"
-    r"(?P<tz>Z|[+-]\d{2}:?\d{2})?\$"
+    r"(?P<tz>Z|[+-]\d{2}:?\d{2})?$"
 )
 
 

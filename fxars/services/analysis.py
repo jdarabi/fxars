@@ -27,6 +27,10 @@ from fxars.domain.models import (
     ScenarioTransition,
 )
 from fxars.instruments.calendar import TradingCalendar
+
+from fxars.core.logging_setup import get_logger
+
+logger = get_logger("services.analysis")
 from fxars.storage.repositories import (
     AnalysisRepository,
     CandleRepository,
