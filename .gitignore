@@ -134,3 +134,11 @@ bench.log
 *.pre-fix
 *.bak
 *.orig
+
+# ============================================
+# Local scripts (may contain secrets)
+# ============================================
+live.local.ps1
+*.local.ps1
+*.local.json
+.env.local

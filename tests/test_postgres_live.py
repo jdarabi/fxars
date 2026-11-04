@@ -1,4 +1,4 @@
-"""FIX-10-PG: live Postgres tests (skip without psycopg + DSN)."""
+"""FIX-10-PG: live Postgres tests (skip without psycopg + DSN or unreachable)."""
 from __future__ import annotations
 
 import os
@@ -24,13 +24,19 @@ DSN = os.environ.get("FXARS_POSTGRES_DSN", "")
 class PostgresLiveTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from fxars.storage.postgres import PostgresDatabase
-        cls.db = PostgresDatabase(DSN, connect_timeout=5)
+        from fxars.storage.postgres import PostgresDatabase, PostgresUnavailableError
+        try:
+            cls.db = PostgresDatabase(DSN, connect_timeout=3)
+        except PostgresUnavailableError as exc:
+            raise unittest.SkipTest(f"Postgres not reachable: {exc}")
+        except Exception as exc:
+            raise unittest.SkipTest(f"Postgres unavailable: {exc}")
         cls.db.migrate()
 
     @classmethod
     def tearDownClass(cls):
-        cls.db.close()
+        if getattr(cls, "db", None) is not None:
+            cls.db.close()
 
     def test_health(self):
         self.assertEqual(self.db.scalar("SELECT 1 AS ok"), 1)
@@ -48,7 +54,8 @@ class PostgresLiveTests(unittest.TestCase):
                 self.db.execute("CREATE TABLE _tmp_tx_test (k INTEGER)")
                 raise RuntimeError("rollback")
         row = self.db.query_one(
-            "SELECT table_name AS name FROM information_schema.tables WHERE table_name='_tmp_tx_test'"
+            "SELECT table_name AS name FROM information_schema.tables "
+            "WHERE table_name='_tmp_tx_test'"
         )
         self.assertIsNone(row)
 
