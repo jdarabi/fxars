@@ -414,9 +414,6 @@ class Position:
         if isinstance(self.side, str):
             object.__setattr__(self, "side", Side(self.side))
 
-    @property
-    def notional_exposure(self) -> Decimal:
-        return self.volume * self.entry_price
 
     def to_dict(self) -> dict[str, Any]:
         return jsonable(self)
