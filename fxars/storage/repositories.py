@@ -102,7 +102,11 @@ class InstrumentRepository:
         return DataSource(**_row_payload(row))
 
     def list_sources(self) -> list[DataSource]:
-        return [DataSource(**_row_payload(row)) for row in self.db.query("SELECT payload FROM data_sources ORDER BY priority")]
+        # FIX-SOURCES-ORDER: priority در payload است، نه ستون
+        rows = list(self.db.query("SELECT payload FROM data_sources"))
+        sources = [DataSource(**_row_payload(row)) for row in rows]
+        sources.sort(key=lambda s: s.priority)
+        return sources
 
     def map_symbol(self, source_id: str, broker_symbol: str, instrument_id: str,
                    valid_from: datetime, valid_to: datetime | None = None) -> None:
