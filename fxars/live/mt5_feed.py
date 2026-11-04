@@ -109,6 +109,12 @@ class MT5Feed:
         now = datetime.now(tz=timezone.utc)
         tf_delta = timeframe_delta(timeframe.upper())
         candles: list[Candle] = []
+        # B7: use symbol point (supports 3-digit JPY, 2-digit XAU)
+        si = self.symbol_info(symbol)
+        if si is None:
+            raise MT5UnavailableError(f'symbol_info({symbol}) is None')
+        point = Decimal(str(si['point']))
+
         for r in rates:
             open_time = datetime.fromtimestamp(int(r['time']), tz=timezone.utc)
             close_time = open_time + tf_delta
@@ -126,7 +132,7 @@ class MT5Feed:
                 low=Decimal(str(r['low'])),
                 close=Decimal(str(r['close'])),
                 tick_volume=int(r['tick_volume']) if 'tick_volume' in r.dtype.names else None,
-                spread=Decimal(str(r['spread'])) * Decimal('0.00001')
+                spread=Decimal(str(r['spread'])) * point
                     if 'spread' in r.dtype.names and r['spread'] > 0 else None,
                 is_closed=True,
                 available_at=close_time,
