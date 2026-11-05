@@ -47,7 +47,26 @@ pre{white-space:pre-wrap;background:#0a1428;border:1px solid var(--border);borde
 .help code{background:#0a1428;padding:2px 6px;border-radius:6px;direction:ltr;display:inline-block}
 .inline{display:flex;gap:8px;align-items:center}
 .inline input[type=checkbox]{width:auto}
-</style>
+
+    /* Chart styles */
+    .chart-card { grid-column: 1 / -1; }
+    .chart-toolbar { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-bottom:10px; }
+    .chart-toolbar > div { flex: 0 0 auto; min-width: 130px; }
+    .chart-toolbar button { flex: 0 0 auto; }
+    .chart-toolbar label { margin: 0; display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; }
+    #chartContainer { height: 460px; background: #0a1428; border-radius: 10px; border: 1px solid var(--border); }
+    #rsiContainer { height: 150px; background: #0a1428; border-radius: 10px; border: 1px solid var(--border); margin-top: 8px; }
+    #chartInfo { margin-top: 10px; font-size: 12px; }
+    .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin-top: 8px; }
+    .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-left: 4px; border-radius: 2px; vertical-align: middle; }
+    .legend .ema20::before { background: #fbbf24; }
+    .legend .ema50::before { background: #f472b6; }
+    .legend .ema200::before { background: #a78bfa; }
+    .legend .entry::before { background: #22c55e; }
+    .legend .stop::before { background: #ef4444; }
+    .legend .target::before { background: #38bdf8; }
+    </style>
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <header id="appHeader" class="hidden">
@@ -93,6 +112,28 @@ pre{white-space:pre-wrap;background:#0a1428;border:1px solid var(--border);borde
 </div>
 
 <main id="appView" class="hidden">
+
+  <section class="card chart-card">
+    <h2>نمودار زنده <span class="muted" id="chartStatus"></span></h2>
+    <div class="chart-toolbar">
+      <div><label>نماد</label><select id="chartInstrument"></select></div>
+      <div><label>تایم‌فریم</label><select id="chartTimeframe"><option>M5</option><option>M15</option><option>M30</option><option selected>H1</option><option>H4</option><option>D1</option></select></div>
+      <div><label>تعداد کندل</label><select id="chartLimit"><option>50</option><option selected>100</option><option>200</option><option>300</option></select></div>
+      <button onclick="loadChart()">بارگذاری</button>
+      <label><input type="checkbox" id="chartAutoRefresh" checked> خودکار (10s)</label>
+    </div>
+    <div id="chartContainer"></div>
+    <div id="rsiContainer"></div>
+    <div class="legend">
+      <span class="ema20">EMA20</span>
+      <span class="ema50">EMA50</span>
+      <span class="ema200">EMA200</span>
+      <span class="entry">Entry</span>
+      <span class="stop">Stop</span>
+      <span class="target">Target</span>
+    </div>
+    <div id="chartInfo" class="muted"></div>
+  </section>
   <section class="card">
     <h2>تحلیل بازار <span class="muted" id="analysisStatus"></span></h2>
     <div class="row">
@@ -265,6 +306,11 @@ async function loadAll() {
     $("btInstrument").innerHTML = options;
     await loadScenarios();
     await loadCandles();
+    await populateChartInstruments();
+    if (typeof loadChart === "function") {
+      try { await loadChart(); } catch (e) { console.warn("loadChart:", e); }
+    }
+    if (typeof setupChartAutoRefresh === "function") setupChartAutoRefresh();
     showApp();
   } catch (error) {
     toast(error.message, false);
@@ -286,6 +332,157 @@ async function loadCandles() {
       "<b>کیفیت</b><span>" + esc(last.quality_status) + "</span>";
   } catch (error) { toast(error.message, false); }
 }
+
+let chartState = { chart: null, candleSeries: null, ema20: null, ema50: null, ema200: null, rsiChart: null, rsiSeries: null, lines: [], timer: null };
+
+async function loadChart() {
+  const instrument = $("chartInstrument").value || "EURUSD";
+  const timeframe = $("chartTimeframe").value || "H1";
+  const limit = parseInt($("chartLimit").value || "100", 10);
+  $("chartStatus").textContent = "در حال بارگذاری...";
+  try {
+    const data = await api("/api/v1/live/chart?instrument=" + encodeURIComponent(instrument) + "&timeframe=" + timeframe + "&limit=" + limit);
+    renderChart(data);
+    $("chartStatus").textContent = data.count + " کندل";
+    $("chartInfo").textContent = data.instrument + " / " + data.timeframe + " — " + data.count + " کندل — منبع: " + (data.source || "?") + " — " + new Date().toLocaleTimeString("fa-IR");
+  } catch (error) {
+    $("chartStatus").textContent = "خطا";
+    toast("بارگذاری نمودار ناموفق: " + error.message, false);
+  }
+}
+
+function renderChart(data) {
+  if (!window.LightweightCharts) {
+    toast("LightweightCharts بارگذاری نشد", false);
+    return;
+  }
+  const LWC = window.LightweightCharts;
+  // Destroy old chart
+  if (chartState.chart) { chartState.chart.remove(); chartState.chart = null; }
+  if (chartState.rsiChart) { chartState.rsiChart.remove(); chartState.rsiChart = null; }
+
+  const container = $("chartContainer");
+  const rsiContainer = $("rsiContainer");
+  const chart = LWC.createChart(container, {
+    width: container.clientWidth,
+    height: 460,
+    layout: { background: { color: "#0a1428" }, textColor: "#94a3b8" },
+    grid: { vertLines: { color: "#1e3a5f" }, horzLines: { color: "#1e3a5f" } },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#1e3a5f" },
+    rightPriceScale: { borderColor: "#1e3a5f" },
+    crosshair: { mode: LWC.CrosshairMode.Normal },
+  });
+
+  const candleSeries = chart.addCandlestickSeries({
+    upColor: "#22c55e", downColor: "#ef4444",
+    borderUpColor: "#22c55e", borderDownColor: "#ef4444",
+    wickUpColor: "#22c55e", wickDownColor: "#ef4444",
+  });
+  candleSeries.setData(data.candles.map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })));
+
+  const ema20 = chart.addLineSeries({ color: "#fbbf24", lineWidth: 1, title: "EMA20" });
+  const ema50 = chart.addLineSeries({ color: "#f472b6", lineWidth: 1, title: "EMA50" });
+  const ema200 = chart.addLineSeries({ color: "#a78bfa", lineWidth: 1, title: "EMA200" });
+  const times = data.candles.map(c => c.time);
+  function setEma(series, values) {
+    if (!values || !values.length) return;
+    const points = [];
+    for (let i = 0; i < Math.min(values.length, times.length); i++) {
+      if (values[i] !== null && values[i] !== undefined) {
+        points.push({ time: times[i], value: values[i] });
+      }
+    }
+    series.setData(points);
+  }
+  setEma(ema20, data.indicators.ema20);
+  setEma(ema50, data.indicators.ema50);
+  setEma(ema200, data.indicators.ema200);
+
+  // Price lines from scenarios
+  const priceLines = [];
+  for (const sc of (data.scenarios || [])) {
+    if (sc.entry) priceLines.push({ price: parseFloat(sc.entry), color: "#22c55e", title: "Entry " + sc.scenario_id.slice(0,8) });
+    if (sc.stop) priceLines.push({ price: parseFloat(sc.stop), color: "#ef4444", title: "Stop " + sc.scenario_id.slice(0,8) });
+    for (const t of (sc.targets || [])) {
+      if (t) priceLines.push({ price: parseFloat(t), color: "#38bdf8", title: "TP " + sc.scenario_id.slice(0,8) });
+    }
+  }
+  for (const pl of priceLines) {
+    candleSeries.createPriceLine({
+      price: pl.price, color: pl.color, lineWidth: 1, lineStyle: 2,
+      axisLabelVisible: true, title: pl.title,
+    });
+  }
+
+  chart.timeScale().fitContent();
+
+  // RSI subchart
+  const rsiChart = LWC.createChart(rsiContainer, {
+    width: rsiContainer.clientWidth,
+    height: 150,
+    layout: { background: { color: "#0a1428" }, textColor: "#94a3b8" },
+    grid: { vertLines: { color: "#1e3a5f" }, horzLines: { color: "#1e3a5f" } },
+    timeScale: { timeVisible: false, borderColor: "#1e3a5f" },
+    rightPriceScale: { borderColor: "#1e3a5f" },
+  });
+  const rsiSeries = rsiChart.addLineSeries({ color: "#38bdf8", lineWidth: 1, title: "RSI14" });
+  if (data.indicators.rsi14) {
+    const rsiPoints = [];
+    for (let i = 0; i < Math.min(data.indicators.rsi14.length, times.length); i++) {
+      if (data.indicators.rsi14[i] !== null && data.indicators.rsi14[i] !== undefined) {
+        rsiPoints.push({ time: times[i], value: data.indicators.rsi14[i] });
+      }
+    }
+    rsiSeries.setData(rsiPoints);
+  }
+  rsiSeries.createPriceLine({ price: 70, color: "#ef4444", lineWidth: 1, lineStyle: 2 });
+  rsiSeries.createPriceLine({ price: 30, color: "#22c55e", lineWidth: 1, lineStyle: 2 });
+  rsiChart.timeScale().fitContent();
+
+  // Sync time scales
+  chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+    if (range) rsiChart.timeScale().setVisibleLogicalRange(range);
+  });
+  rsiChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+    if (range) chart.timeScale().setVisibleLogicalRange(range);
+  });
+
+  // Resize handler
+  const resizeObserver = new ResizeObserver(() => {
+    chart.applyOptions({ width: container.clientWidth });
+    rsiChart.applyOptions({ width: rsiContainer.clientWidth });
+  });
+  resizeObserver.observe(container);
+
+  chartState.chart = chart;
+  chartState.candleSeries = candleSeries;
+  chartState.ema20 = ema20;
+  chartState.ema50 = ema50;
+  chartState.ema200 = ema200;
+  chartState.rsiChart = rsiChart;
+  chartState.rsiSeries = rsiSeries;
+}
+
+function setupChartAutoRefresh() {
+  if (chartState.timer) clearInterval(chartState.timer);
+  chartState.timer = setInterval(() => {
+    if ($("chartAutoRefresh").checked) loadChart();
+  }, 10000);
+}
+
+// Populate chart instrument select from /instruments
+async function populateChartInstruments() {
+  try {
+    const data = await api("/api/v1/instruments");
+    const options = data.items.map(i => "<option>" + esc(i.instrument_id) + "</option>").join("");
+    $("chartInstrument").innerHTML = options;
+    // Default to EURUSD if exists
+    const options2 = Array.from($("chartInstrument").options);
+    const eurusd = options2.find(o => o.value === "EURUSD");
+    if (eurusd) $("chartInstrument").value = "EURUSD";
+  } catch (e) { toast("بارگذاری نمادها ناموفق: " + e.message, false); }
+}
+
 
 async function runAnalysis() {
   $("analysisStatus").textContent = "در حال اجرا...";

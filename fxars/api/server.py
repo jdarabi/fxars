@@ -132,6 +132,8 @@ class ApiApp:
         add("GET", r"^/api/v1/outbox/stats$", self._outbox_stats, Permission.AUDIT_READ)
         add("POST", r"^/api/v1/outbox/publish$", self._outbox_publish, Permission.KILLSWITCH_TOGGLE)
         add("POST", r"^/api/v1/killswitch$", self._killswitch_set, Permission.KILLSWITCH_TOGGLE)
+        add("GET", r"^/api/v1/live/chart$", self._live_chart, Permission.DATA_READ)
+        add("GET", r"^/api/v1/live/signals$", self._live_signals, Permission.SCENARIO_READ)
 
     def handle(self, request: ApiRequest) -> ApiResponse:
         correlation = request.headers.get("x-correlation-id") or None
@@ -295,6 +297,131 @@ class ApiApp:
             content_type="text/html; charset=utf-8",
             headers={"Cache-Control": "no-store, max-age=0"},
         )
+
+    def _live_chart(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        """Live chart data: candles + indicators + active scenarios."""
+        from fxars.analysis import indicators as ind
+        from fxars.analysis.context import IndicatorSet
+        from decimal import Decimal
+
+        instrument_id = request.one("instrument")
+        timeframe = (request.one("timeframe") or "H1").upper()
+        limit = request.integer("limit", 100, minimum=10, maximum=500)
+
+        if not instrument_id:
+            raise ValidationError("parameter instrument is required")
+
+        # Try to find instrument spec
+        try:
+            instrument = self.platform.instruments.find(instrument_id)
+        except Exception:
+            instrument = None
+        if instrument is None:
+            raise NotFoundError("instrument not found: " + instrument_id)
+
+        # Primary source
+        try:
+            source_id = self.platform.instruments.primary_source(instrument_id, timeframe)
+        except Exception:
+            source_id = None
+
+        # Fetch candles
+        candles = self.platform.candles.range(
+            instrument_id, timeframe, source_id=source_id, closed_only=True,
+        )
+        if not candles:
+            raise NotFoundError("no candles for " + instrument_id + "/" + timeframe)
+
+        # Take last N
+        tail = candles[-limit:]
+
+        # Build indicators (needs enough bars)
+        indicators_out = {"ema20": [], "ema50": [], "ema200": [], "rsi14": []}
+        if len(tail) >= 20:
+            try:
+                full_ind = IndicatorSet.build(list(candles), self.platform.settings.analysis)
+                offset = len(candles) - len(tail)
+                for k in ("ema_fast", "ema_slow", "ema_trend", "rsi"):
+                    series = getattr(full_ind, k)
+                    sliced = series[offset:]
+                    key = {"ema_fast": "ema20", "ema_slow": "ema50", "ema_trend": "ema200", "rsi": "rsi14"}[k]
+                    indicators_out[key] = [None if v is None else round(float(v), 6) for v in sliced]
+            except Exception as exc:
+                logger.warning("indicator build failed: %s", exc)
+
+        # Active scenarios for this instrument/timeframe
+        scenarios_out = []
+        try:
+            live = self.platform.scenarios.list(instrument_id=instrument_id, limit=20)
+            for s in live:
+                if s.timeframe != timeframe:
+                    continue
+                if s.status.value not in ("WATCH", "ARMED", "TRIGGERED"):
+                    continue
+                scenarios_out.append({
+                    "scenario_id": s.scenario_id,
+                    "direction": s.direction.value,
+                    "status": s.status.value,
+                    "entry": s.entry_condition.get("level") if s.entry_condition else None,
+                    "stop": s.stop_logic.get("level") if s.stop_logic else None,
+                    "targets": [t.get("price") for t in (s.target_logic or ())],
+                    "expiry_at": s.expiry_at.isoformat(),
+                })
+        except Exception as exc:
+            logger.warning("scenarios load failed: %s", exc)
+
+        # Convert candles
+        candle_items = []
+        for c in tail:
+            candle_items.append({
+                "time": c.open_time.isoformat(),
+                "open": float(c.open),
+                "high": float(c.high),
+                "low": float(c.low),
+                "close": float(c.close),
+                "volume": c.tick_volume or 0,
+            })
+
+        return self._json(200, {
+            "instrument": instrument_id,
+            "timeframe": timeframe,
+            "source": source_id,
+            "count": len(candle_items),
+            "candles": candle_items,
+            "indicators": indicators_out,
+            "scenarios": scenarios_out,
+        })
+
+    def _live_signals(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        """Recent signals from scenarios (across instruments/timeframes)."""
+        limit = request.integer("limit", 20, minimum=1, maximum=100)
+
+        items = []
+        try:
+            scenarios = self.platform.scenarios.list(limit=limit * 2)
+            for s in scenarios:
+                if s.status.value not in ("WATCH", "ARMED", "TRIGGERED", "DRAFT"):
+                    continue
+                items.append({
+                    "scenario_id": s.scenario_id,
+                    "instrument": s.instrument_id,
+                    "timeframe": s.timeframe,
+                    "direction": s.direction.value,
+                    "status": s.status.value,
+                    "strength": float(s.strength) if hasattr(s, "strength") else 0.0,
+                    "entry": s.entry_condition.get("level") if s.entry_condition else None,
+                    "stop": s.stop_logic.get("level") if s.stop_logic else None,
+                    "targets": [t.get("price") for t in (s.target_logic or ())],
+                    "expiry_at": s.expiry_at.isoformat(),
+                    "created_at": s.created_at.isoformat(),
+                })
+                if len(items) >= limit:
+                    break
+        except Exception as exc:
+            logger.warning("signals load failed: %s", exc)
+
+        return self._json(200, {"items": items, "count": len(items)})
+
 
     def _health(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         db_ok = self.platform.db.query_one("SELECT 1 AS ok") is not None
