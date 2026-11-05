@@ -54,6 +54,7 @@ class ScheduleConfig:
 @dataclass
 class LiveConfig:
     instrument: str = "EURUSD"
+    instruments: list[str] = field(default_factory=list)
     timeframes: list[str] = field(default_factory=lambda: list(DEFAULT_TIMEFRAMES))
     primary_timeframe: str = "H1"
     interval_seconds: int = 60
@@ -65,9 +66,11 @@ class LiveConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LiveConfig":
+        instruments = list(data.get('instruments') or [data.get('instrument', 'EURUSD')])
         data = data or {}
         return cls(
             instrument=str(data.get("instrument", "EURUSD")),
+            instruments=instruments,
             timeframes=list(data.get("timeframes", DEFAULT_TIMEFRAMES)),
             primary_timeframe=str(data.get("primary_timeframe", "H1")),
             interval_seconds=int(data.get("interval_seconds", 60)),
