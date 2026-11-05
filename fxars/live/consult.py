@@ -1,6 +1,7 @@
-"""Consultant: live advisor for selected instruments/timeframes.
+"""Consultant: live advisor with Desktop + Telegram notifications.
 
-Reads candles from MT5, runs analysis, prints/notifies signals.
+Reads candles from MT5, runs analysis, generates actionable advice
+(BUY/SELL/HOLD/EXIT/WAIT), notifies via Desktop (Windows toast) + Telegram.
 Does NOT send orders (READ_ONLY phase).
 """
 from __future__ import annotations
@@ -12,60 +13,49 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from fxars.live.advisor import Advice, AdviceAction, generate_advice
 from fxars.live.config import LiveConfig
+from fxars.live.desktop_notifier import DesktopConfig, DesktopNotifier
 from fxars.live.mt5_feed import MT5Feed, MT5UnavailableError
 from fxars.live.notifier import TelegramConfig, TelegramNotifier
 
 logger = logging.getLogger("fxars.live.consult")
 
 
-def _format_signal_with_context(decision, scenario, symbol, timeframe):
-    """Format signal with explicit symbol + timeframe."""
+def _format_advice_telegram(advice: Advice) -> str:
+    """HTML format for Telegram."""
     from fxars.live.notifier import _escape
 
-    action = decision.action.value if hasattr(decision.action, "value") else str(decision.action)
-    direction = decision.direction.value if hasattr(decision.direction, "value") else str(decision.direction)
-    score = float(decision.score) if decision.score is not None else 0.0
-    coverage = float(decision.coverage) if decision.coverage is not None else 0.0
-    stability = float(decision.stability) if decision.stability is not None else 0.0
-    family_scores = decision.family_scores or {}
+    emoji = {
+        AdviceAction.BUY: "🟢", AdviceAction.SELL: "🔴",
+        AdviceAction.HOLD: "🟡", AdviceAction.EXIT: "🟠",
+        AdviceAction.STAY_OUT: "⚪", AdviceAction.WAIT: "🔵",
+    }.get(advice.action, "⚪")
 
     parts = [
-        "<b>FX-ARS SIGNAL</b>",
-        "<b>" + _escape(symbol) + "</b> / <b>" + _escape(timeframe) + "</b>",
-        "Action: <b>" + _escape(action) + "</b> | Direction: <b>" + _escape(direction) + "</b>",
-        "Score: " + format(score, "+.3f") + "  Coverage: " + format(coverage, ".0%") + "  Stability: " + format(stability, ".0%"),
+        "<b>" + emoji + " " + _escape(advice.symbol) + " / " + _escape(advice.timeframe) + "</b>",
+        "<b>پیشنهاد: " + _escape(advice.action.value) + "</b>",
+        "اعتماد: " + format(advice.confidence, ".0%"),
+        "",
+        _escape(advice.reason),
     ]
-    if family_scores:
-        joined = ", ".join(k + "=" + format(v, "+.2f") for k, v in family_scores.items())
-        parts.append("<i>Families</i>: " + _escape(joined))
-
-    if scenario is not None:
+    if advice.entry is not None:
         parts.append("")
-        parts.append("<b>SCENARIO</b>")
-        entry = scenario.entry_condition or {}
-        stop_logic = scenario.stop_logic or {}
-        targets = scenario.target_logic or ()
-        parts.append(
-            "Entry: <b>" + _escape(str(entry.get("type", "—"))) + "</b> "
-            + "@ <code>" + _escape(str(entry.get("level", "—"))) + "</code>"
-        )
-        parts.append("Stop : <code>" + _escape(str(stop_logic.get("level", "—"))) + "</code>")
-        for idx, t in enumerate(targets[:2], start=1):
-            parts.append(
-                "TP" + str(idx) + "  : <code>" + _escape(str(t.get("price", "—"))) + "</code> "
-                + "(" + _escape(str(t.get("value", "—"))) + "R)"
-            )
-        exp = scenario.expiry_at
-        if exp is not None:
-            parts.append("Expiry: " + _escape(exp.isoformat()))
-
-    parts.append("")
-    parts.append("<i>— برای تأیید / رد، به داشبورد مراجعه کن —</i>")
+        parts.append("ورود: <code>" + _escape(str(advice.entry)) + "</code>")
+        if advice.stop is not None:
+            parts.append("حد ضرر: <code>" + _escape(str(advice.stop)) + "</code>")
+        for i, t in enumerate(advice.targets[:2], 1):
+            parts.append("هدف " + str(i) + ": <code>" + _escape(str(t)) + "</code>")
+    if advice.suggestions:
+        parts.append("")
+        parts.append("<b>پیشنهادها:</b>")
+        for s in advice.suggestions[:4]:
+            parts.append("• " + _escape(s))
     return "\n".join(parts)
 
+
 class Consultant:
-    """Advisor: analyze live candles, print signals, notify Telegram."""
+    """Advisor: analyze live candles, print signals, notify Desktop + Telegram."""
 
     def __init__(
         self,
@@ -73,12 +63,14 @@ class Consultant:
         platform: Any,
         feed: Any,
         config: LiveConfig,
-        notifier: TelegramNotifier | None = None,
+        telegram: TelegramNotifier | None = None,
+        desktop: DesktopNotifier | None = None,
     ) -> None:
         self.platform = platform
         self.feed = feed
         self.config = config
-        self.notifier = notifier
+        self.telegram = telegram
+        self.desktop = desktop
         self._last_signals: dict[tuple[str, str], str] = {}
         self._signal_times: list[datetime] = []
 
@@ -95,7 +87,6 @@ class Consultant:
         for symbol in instruments:
             for tf in timeframes:
                 try:
-                    # Ensure instrument exists
                     if not self.platform.instruments.find(symbol):
                         print(f"[{symbol:8s}/{tf:3s}] instrument not registered, skipping", file=sys.stderr)
                         continue
@@ -113,37 +104,54 @@ class Consultant:
 
                     result = self.platform.run_analysis(symbol, tf, actor="consultant")
                     d = result.decision
-                    action = d.action.value
-                    score = float(d.score)
+                    sc = result.scenario
+
+                    instrument = self.platform.instruments.find(symbol)
+                    advice = generate_advice(
+                        decision=d, scenario=sc, symbol=symbol, timeframe=tf,
+                        risk_decision=None, instrument_spec=instrument,
+                    )
 
                     info = {
                         "symbol": symbol,
                         "timeframe": tf,
-                        "action": action,
-                        "score": score,
-                        "no_trade_reason": d.no_trade_reason,
-                        "scenario_id": result.scenario.scenario_id if result.scenario else None,
-                        "entry": result.scenario.entry_condition.get("level") if result.scenario else None,
-                        "stop": result.scenario.stop_logic.get("level") if result.scenario else None,
-                        "targets": [t.get("price") for t in (result.scenario.target_logic or ())] if result.scenario else [],
-                        "expiry": result.scenario.expiry_at.isoformat() if result.scenario else None,
+                        "action": d.action.value,
+                        "advice_action": advice.action.value,
+                        "confidence": advice.confidence,
+                        "score": float(d.score),
+                        "scenario_id": sc.scenario_id if sc else None,
                     }
                     signals.append(info)
-                    self._print_signal(info)
+                    self._print_signal(info, advice)
 
-                    if action in ("LONG", "SHORT") and self.notifier is not None:
+                    # Desktop + Telegram for actionable advice
+                    actionable = advice.action.value in ("BUY", "SELL", "EXIT")
+                    if actionable and self._rate_ok():
                         key = (symbol, tf)
-                        if self._last_signals.get(key) != action:
-                            if self._rate_ok():
-                                msg = _format_signal_with_context(d, result.scenario, symbol, tf)
-                                self.notifier.send_message(msg)
-                                self._last_signals[key] = action
-                                self._signal_times.append(datetime.now(tz=timezone.utc))
-                                print(f"           -> Telegram sent", file=sys.stderr)
-                            else:
-                                print(f"           -> Telegram skipped (rate limit)", file=sys.stderr)
+                        if self._last_signals.get(key) != advice.action.value:
+                            # Desktop
+                            if self.desktop is not None:
+                                try:
+                                    ok = self.desktop.send_advice(advice)
+                                    print(f"           -> Desktop {'OK' if ok else 'FAIL'}", file=sys.stderr)
+                                except Exception as exc:
+                                    print(f"           -> Desktop error: {exc}", file=sys.stderr)
+
+                            # Telegram
+                            if self.telegram is not None:
+                                try:
+                                    msg = _format_advice_telegram(advice)
+                                    ok = self.telegram.send_message(msg)
+                                    print(f"           -> Telegram {'OK' if ok else 'FAIL'}", file=sys.stderr)
+                                except Exception as exc:
+                                    print(f"           -> Telegram error: {exc}", file=sys.stderr)
+
+                            self._last_signals[key] = advice.action.value
+                            self._signal_times.append(datetime.now(tz=timezone.utc))
                         else:
-                            print(f"           -> Telegram skipped (duplicate {action})", file=sys.stderr)
+                            print(f"           -> skipped (duplicate {advice.action.value})", file=sys.stderr)
+                    elif actionable:
+                        print(f"           -> skipped (rate limit)", file=sys.stderr)
 
                 except MT5UnavailableError as exc:
                     print(f"[{symbol:8s}/{tf:3s}] MT5 error: {exc}", file=sys.stderr)
@@ -152,24 +160,21 @@ class Consultant:
 
         return signals
 
-    def _print_signal(self, info: dict[str, Any]) -> None:
+    def _print_signal(self, info: dict[str, Any], advice: Advice) -> None:
         symbol = info["symbol"]
         tf = info["timeframe"]
-        action = info["action"]
+        action = info["advice_action"]
+        conf = info["confidence"]
         score = info["score"]
-        if action == "LONG":
-            color = "\033[92m"
-        elif action == "SHORT":
-            color = "\033[91m"
-        else:
-            color = "\033[90m"
+        color = {
+            "BUY": "\033[92m", "SELL": "\033[91m",
+            "HOLD": "\033[93m", "EXIT": "\033[33m",
+            "WAIT": "\033[94m", "STAY_OUT": "\033[90m",
+        }.get(action, "\033[90m")
         reset = "\033[0m"
-        print(f"{color}[{symbol:8s}/{tf:3s}] {action:8s} score={score:+.3f}{reset}")
-        if info.get("scenario_id"):
-            print(f"           Entry: {info['entry']}  Stop: {info['stop']}  Targets: {info['targets']}")
-            print(f"           Expiry: {info['expiry']}")
-        if info.get("no_trade_reason"):
-            print(f"           Reason: {info['no_trade_reason']}")
+        print(f"{color}[{symbol:8s}/{tf:3s}] {action:8s} conf={conf:.0%} score={score:+.3f}{reset}")
+        for s in advice.suggestions[:3]:
+            print(f"           • {s}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -180,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--interval", type=int, default=0)
     parser.add_argument("--max-cycles", type=int, default=None)
     parser.add_argument("--no-telegram", action="store_true")
+    parser.add_argument("--no-desktop", action="store_true")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -204,24 +210,36 @@ def main(argv: list[str] | None = None) -> int:
         print(f"MT5 unavailable: {exc}", file=sys.stderr)
         return 2
 
-    notifier = None
+    telegram = None
     if not args.no_telegram:
         tg = TelegramConfig.from_env()
         if tg is not None:
             try:
-                notifier = TelegramNotifier(tg)
+                telegram = TelegramNotifier(tg)
                 print(f"Telegram enabled (chat_id={tg.chat_id})", file=sys.stderr)
             except Exception as exc:
                 print(f"Telegram disabled: {exc}", file=sys.stderr)
         else:
             print("Telegram disabled (env vars not set)", file=sys.stderr)
 
-    consultant = Consultant(platform=platform, feed=feed, config=config, notifier=notifier)
+    desktop = None
+    if not args.no_desktop:
+        try:
+            desktop = DesktopNotifier(DesktopConfig())
+            print(f"Desktop enabled (method={desktop._method})", file=sys.stderr)
+        except Exception as exc:
+            print(f"Desktop disabled: {exc}", file=sys.stderr)
+
+    consultant = Consultant(
+        platform=platform, feed=feed, config=config,
+        telegram=telegram, desktop=desktop,
+    )
 
     print(f"\n=== FX-ARS Consultant ===", file=sys.stderr)
     print(f"Instruments: {config.instruments}", file=sys.stderr)
     print(f"Timeframes:  {config.timeframes}", file=sys.stderr)
     print(f"Interval:    {config.interval_seconds}s", file=sys.stderr)
+    print(f"Max signals/hour: {config.max_signals_per_hour}", file=sys.stderr)
     print(f"\nPress Ctrl+C to stop.\n", file=sys.stderr)
 
     cycles = 0
