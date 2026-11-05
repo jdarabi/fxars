@@ -142,3 +142,11 @@ live.local.ps1
 *.local.ps1
 *.local.json
 .env.local
+
+# Telegram secrets
+.env
+.env.local
+
+# Telegram secrets
+.env
+.env.local
