@@ -60,6 +60,28 @@ from fxars.storage.repositories import (
 )
 
 
+
+
+def _select_broker(settings):
+    """Select broker based on phase (READ_ONLY/PAPER/DEMO/AUTOMATED_LIMITED)."""
+    from fxars.domain.enums import Phase
+    if not settings.execution_enabled:
+        return None
+    phase = settings.phase
+    if phase is Phase.PAPER:
+        from fxars.execution.paper_broker import PaperBroker
+        return PaperBroker()
+    if phase in (Phase.DEMO, Phase.AUTOMATED_LIMITED):
+        try:
+            from fxars.execution.mt5_broker import MT5Broker
+            return MT5Broker()
+        except Exception as exc:
+            print(f"[WARN] MT5Broker unavailable ({exc}); falling back to PaperBroker")
+            from fxars.execution.paper_broker import PaperBroker
+            return PaperBroker()
+    return None
+
+
 class Platform:
     def __init__(
         self,
@@ -149,7 +171,7 @@ class Platform:
         self.execution = ExecutionService(
             settings=self.settings, clock=self.clock, scenarios=self.scenarios, decisions=self.decisions,
             orders=self.orders, killswitch=self.killswitch, audit=self.audit, outbox=self.outbox,
-            broker=PaperBroker() if self.settings.execution_enabled else None,
+            broker=_select_broker(self.settings),
         )
 
         # FIX-08-OUTBOX-CONSUMER: ثبت consumerهای پیش‌فرض

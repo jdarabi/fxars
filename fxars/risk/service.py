@@ -1,6 +1,7 @@
 """سرویس ریسک: آماده‌سازی زمینه، اجرای دروازه، ثبت تصمیم و رویداد."""
 
 from __future__ import annotations
+from decimal import Decimal
 
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -92,6 +93,23 @@ class RiskService:
                     instruments[position.instrument_id] = found
         correlations = self._correlations(scenario.instrument_id, list(instruments), scenario.timeframe, moment)
         rate_map = {key: to_decimal(value) for key, value in (rates or {"USD": "1"}).items()}
+
+        # FIX-JPY-RATE: auto-populate quote currency rates from MT5
+        if instrument is not None and instrument.quote_currency != (snapshot.currency if snapshot else 'USD'):
+            _q = instrument.quote_currency.upper()
+            if _q not in rate_map:
+                try:
+                    import MetaTrader5 as _mt5
+                    _mt5.initialize()
+                    _acct_ccy = (snapshot.currency if snapshot else 'USD').upper()
+                    _pair = f'{_q}{_acct_ccy}'
+                    _tick = _mt5.symbol_info_tick(_pair)
+                    if _tick is not None and _tick.bid > 0:
+                        rate_map[_q] = to_decimal(Decimal('1') / Decimal(str(_tick.bid)))
+                    _mt5.shutdown()
+                except Exception:
+                    pass
+
         context = RiskContext(
             scenario=scenario,
             account=snapshot,

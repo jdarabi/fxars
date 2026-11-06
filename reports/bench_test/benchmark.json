@@ -1,0 +1,43 @@
+{
+  "instrument": "EURUSD",
+  "timeframe": "H1",
+  "segment": "ALL",
+  "baseline": {
+    "run_id": "bt_6193b8bb1c4ddd2492c0fed7",
+    "trade_count": 398,
+    "net_profit": 320.7506,
+    "return_pct": 3.207506,
+    "profit_factor": 1.151652,
+    "win_rate": 0.552764,
+    "max_drawdown_pct": 0.025122,
+    "sharpe": 1.293314,
+    "sortino": 1.854782,
+    "calmar": 1.731642,
+    "expectancy": 0.805906,
+    "dsr": 0.867224,
+    "skipped_regime": 0
+  },
+  "filtered": {
+    "run_id": "bt_708fc22831a0728eaaf77471",
+    "trade_count": 346,
+    "net_profit": 320.289149,
+    "return_pct": 3.202891,
+    "profit_factor": 1.19563,
+    "win_rate": 0.580925,
+    "max_drawdown_pct": 0.022292,
+    "sharpe": 1.574358,
+    "sortino": 2.247712,
+    "calmar": 2.300839,
+    "expectancy": 0.925691,
+    "dsr": 0.893994,
+    "skipped_regime": 672
+  },
+  "delta": {
+    "trade_count_pct": -13.07,
+    "net_profit_pct": -0.14,
+    "sharpe_pct": 21.73,
+    "calmar_pct": 32.87,
+    "dsr_pct": 3.09
+  },
+  "timestamp": "2026-11-04T21:45:09.378655"
+}
