@@ -13,6 +13,7 @@ from fxars.live.config import LiveConfig
 from fxars.live.desktop_notifier import DesktopConfig, DesktopNotifier
 from fxars.live.mt5_feed import MT5Feed, MT5UnavailableError
 from fxars.live.notifier import TelegramConfig, TelegramNotifier
+from fxars.execution.trailing import apply_trailing_sl as _apply_trailing_sl
 
 logger = logging.getLogger("fxars.live.consult")
 
@@ -47,124 +48,6 @@ def _format_advice_telegram(advice: Advice) -> str:
             parts.append("• " + _escape(s))
     return "\n".join(parts)
 
-
-
-def _apply_trailing_sl(trailing_pips: int = 20) -> int:
-    """Apply trailing stop loss to all open positions.
-    
-    Returns number of positions updated.
-    """
-    try:
-        import MetaTrader5 as mt5
-        positions = mt5.positions_get()
-        if not positions:
-            return 0
-        
-        updated = 0
-        for p in positions:
-            si = mt5.symbol_info(p.symbol)
-            if si is None:
-                continue
-            
-            current = p.price_current
-            entry = p.price_open
-            
-            if si.digits == 3:  # JPY
-                buffer_points = trailing_pips
-            elif si.digits == 2:  # XAU
-                buffer_points = trailing_pips * 10
-            else:  # 5-digit
-                buffer_points = trailing_pips * 10
-            
-            if p.type == 1:  # SELL
-                new_sl = current + si.point * buffer_points
-                if p.sl > 0 and new_sl >= p.sl:
-                    continue  # not better
-                if new_sl > entry:
-                    new_sl = entry  # at worst breakeven
-                request = {
-                    "action": mt5.TRADE_ACTION_SLTP,
-                    "position": p.ticket,
-                    "symbol": p.symbol,
-                    "sl": float(new_sl),
-                    "tp": float(p.tp),
-                }
-            else:  # BUY
-                new_sl = current - si.point * buffer_points
-                if p.sl > 0 and new_sl <= p.sl:
-                    continue
-                if new_sl < entry:
-                    new_sl = entry
-                request = {
-                    "action": mt5.TRADE_ACTION_SLTP,
-                    "position": p.ticket,
-                    "symbol": p.symbol,
-                    "sl": float(new_sl),
-                    "tp": float(p.tp),
-                }
-            
-            result = mt5.order_send(request)
-            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                updated += 1
-        
-        return updated
-    except Exception:
-        return 0
-
-
-def _apply_trailing_sl(trailing_pips: int = 20) -> int:
-    """Apply trailing stop to all open positions. Returns count updated."""
-    try:
-        import MetaTrader5 as mt5
-        positions = mt5.positions_get()
-        if not positions:
-            return 0
-
-        updated = 0
-        for p in positions:
-            si = mt5.symbol_info(p.symbol)
-            if si is None:
-                continue
-
-            current = p.price_current
-            entry = p.price_open
-
-            if si.digits == 3:  # JPY
-                buffer_points = trailing_pips
-            elif si.digits == 2:  # XAU
-                buffer_points = trailing_pips * 10
-            else:  # 5-digit forex
-                buffer_points = trailing_pips * 10
-
-            if p.type == 1:  # SELL
-                new_sl = current + si.point * buffer_points
-                if p.sl > 0 and new_sl >= p.sl:
-                    continue
-                if new_sl > entry:
-                    new_sl = entry
-            else:  # BUY
-                new_sl = current - si.point * buffer_points
-                if p.sl > 0 and new_sl <= p.sl:
-                    continue
-                if new_sl < entry:
-                    new_sl = entry
-
-            request = {
-                "action": mt5.TRADE_ACTION_SLTP,
-                "position": p.ticket,
-                "symbol": p.symbol,
-                "sl": float(new_sl),
-                "tp": float(p.tp),
-            }
-            result = mt5.order_send(request)
-            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                updated += 1
-                print(f"           trailing {p.symbol}: SL -> {new_sl}", file=sys.stderr)
-
-        return updated
-    except Exception as exc:
-        print(f"           trailing error: {exc}", file=sys.stderr)
-        return 0
 
 
 class Consultant:
@@ -255,15 +138,10 @@ class Consultant:
                 except Exception as exc:
                     print(f"[{symbol:8s}/{tf:3s}] {type(exc).__name__}: {exc}", file=sys.stderr)
 
-        # Apply trailing SL to all positions
+        # Apply trailing SL to all positions (FIX-08: single call)
         n_updated = _apply_trailing_sl(40)
         if n_updated > 0:
             print(f'           -> trailing SL updated on {n_updated} position(s)', file=sys.stderr)
-
-        # Apply trailing SL
-        n_updated = _apply_trailing_sl(40)
-        if n_updated > 0:
-            print(f'           -> trailing updated on {n_updated} position(s)', file=sys.stderr)
 
         return signals
 
