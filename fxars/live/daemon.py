@@ -4,10 +4,11 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from fxars.core.timeutil import format_ts
 from fxars.live.config import ScheduleConfig
@@ -55,7 +56,7 @@ class LiveDaemonStats:
     last_run_id: str = ""
     last_decision: str = ""
     last_candle_time: str = ""
-    started_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
     def to_dict(self) -> dict:
         return {
@@ -68,7 +69,7 @@ class LiveDaemonStats:
             "last_decision": self.last_decision,
             "last_candle_time": self.last_candle_time,
             "started_at": format_ts(self.started_at),
-            "uptime_seconds": int((datetime.now(tz=timezone.utc) - self.started_at).total_seconds()),
+            "uptime_seconds": int((datetime.now(tz=UTC) - self.started_at).total_seconds()),
         }
 
 
@@ -88,7 +89,7 @@ class LiveDaemon:
         self.feed = feed
         self.notifier = notifier
         self._sleep = sleep_fn
-        self._now = now_fn or (lambda: datetime.now(tz=timezone.utc))
+        self._now = now_fn or (lambda: datetime.now(tz=UTC))
         self._stop = False
         self.stats = LiveDaemonStats()
         self._last_candle_times: dict[str, datetime] = {}

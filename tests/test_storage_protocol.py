@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path as _P
 
@@ -18,7 +18,7 @@ from fxars.storage.repositories import CandleRepository, InstrumentRepository
 
 
 def _make_candle(index: int, price: float = 1.08) -> Candle:
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     return Candle(
         instrument_id="EURUSD", source_id="test", timeframe="H1",
         open_time=start.replace(hour=index),

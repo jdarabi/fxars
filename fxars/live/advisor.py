@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -29,7 +29,7 @@ class Advice:
     stop: Decimal | None = None
     targets: list[Decimal] = field(default_factory=list)
     scenario_id: str | None = None
-    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=UTC))
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -1,4 +1,4 @@
-﻿"""In-process metrics registry (Prometheus text exposition format)."""
+"""In-process metrics registry (Prometheus text exposition format)."""
 from __future__ import annotations
 
 import threading
@@ -64,9 +64,9 @@ class MetricsRegistry:
         with self._lock:
             return {
                 "uptime_seconds": round(time.monotonic() - self._start_time, 3),
-                "counters": [{"name": n, "labels": dict(l), "value": round(v, 6)} for (n, l), v in self._counters.items()],
-                "gauges": [{"name": n, "labels": dict(l), "value": round(v, 6)} for (n, l), v in self._gauges.items()],
-                "histograms": [{"name": n, "labels": dict(l), "count": h.total, "sum": round(h.sum, 6)} for (n, l), h in self._histograms.items()],
+                "counters": [{"name": n, "labels": dict(lbl), "value": round(v, 6)} for (n, lbl), v in self._counters.items()],
+                "gauges": [{"name": n, "labels": dict(lbl), "value": round(v, 6)} for (n, lbl), v in self._gauges.items()],
+                "histograms": [{"name": n, "labels": dict(lbl), "count": h.total, "sum": round(h.sum, 6)} for (n, lbl), h in self._histograms.items()],
             }
 
     def render_prometheus(self):

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from fxars.analysis import indicators as ind
 from fxars.analysis.context import AnalysisContext
 from fxars.analysis.evidence import EvidenceFactory
-from fxars.core.numerics import clamp, zscore
+from fxars.core.numerics import clamp
 from fxars.domain.enums import Direction, EvidenceFamily
 from fxars.domain.models import Evidence
 

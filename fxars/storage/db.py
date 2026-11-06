@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any
 
 from fxars.core.errors import ConflictError
 from fxars.core.timeutil import format_ts, utcnow
@@ -65,7 +66,7 @@ class Database:
         return None if row is None else row[0]
 
     @contextmanager
-    def transaction(self) -> Iterator["Database"]:
+    def transaction(self) -> Iterator[Database]:
         """تراکنش سریالی؛ فراخوانی تودرتو از همان تراکنش استفاده می‌کند."""
         with self._lock:
             if self._depth == 0:
@@ -116,7 +117,7 @@ class Database:
         with self._lock:
             self._conn.close()
 
-    def __enter__(self) -> "Database":
+    def __enter__(self) -> Database:
         return self
 
     def __exit__(self, *exc) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path as _P
 
@@ -22,7 +22,7 @@ from fxars.research.labeling import (
 
 
 def _make_candle(index, open_, high, low, close):
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     return Candle(
         instrument_id="EURUSD", source_id="test", timeframe="H1",
         open_time=start + timedelta(hours=index),

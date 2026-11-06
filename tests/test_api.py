@@ -7,6 +7,7 @@ import unittest
 
 from fxars.api.server import ApiApp, ApiRequest
 from fxars.identity.totp import totp
+
 from tests.helpers import ADMIN_PASSWORD, ANALYST_PASSWORD, make_env
 
 

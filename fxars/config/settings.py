@@ -31,7 +31,7 @@ class DatabaseSettings:
     postgres_application_name: str = "fxars"
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DatabaseSettings":
+    def from_dict(cls, data: dict[str, Any]) -> DatabaseSettings:
         data = data or {}
         return cls(
             backend=str(data.get("backend", "sqlite")),
@@ -70,7 +70,7 @@ class RiskPolicy:
     require_mfa_for_admin: bool = True
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RiskPolicy":
+    def from_dict(cls, data: dict[str, Any]) -> RiskPolicy:
         data = data or {}
         return cls(
             version=str(data.get("version", cls.version)),
@@ -148,7 +148,7 @@ class AnalysisSettings:
     )
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AnalysisSettings":
+    def from_dict(cls, data: dict) -> AnalysisSettings:
         data = data or {}
         base = cls()
         values = {}
@@ -185,7 +185,7 @@ class DataQualitySettings:
     require_available_at: bool = True
 
     @classmethod
-    def from_dict(cls, data: dict) -> "DataQualitySettings":
+    def from_dict(cls, data: dict) -> DataQualitySettings:
         data = data or {}
         return cls(
             max_bar_age_bars=float(data.get("max_bar_age_bars", 1.5)),
@@ -219,7 +219,7 @@ class ApiSettings:
     rate_limit_prefix: str = "fxars:rl:"
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ApiSettings":
+    def from_dict(cls, data: dict) -> ApiSettings:
         data = data or {}
         return cls(
             host=str(data.get("host", "127.0.0.1")),
@@ -247,7 +247,7 @@ class SecuritySettings:
     session_token_bytes: int = 32
 
     @classmethod
-    def from_dict(cls, data: dict) -> "SecuritySettings":
+    def from_dict(cls, data: dict) -> SecuritySettings:
         data = data or {}
         roles = data.get("mfa_roles", ["ADMIN", "RISK_MANAGER", "OPERATOR"])
         return cls(
@@ -286,7 +286,7 @@ class BacktestSettings:
     allowed_regimes: tuple = ()
 
     @classmethod
-    def from_dict(cls, data: dict) -> "BacktestSettings":
+    def from_dict(cls, data: dict) -> BacktestSettings:
         data = data or {}
         targets = data.get("target_r_multiples", [1.5, 3.0])
         return cls(
@@ -366,7 +366,7 @@ class Settings:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Settings":
+    def from_dict(cls, data: dict) -> Settings:
         data = data or {}
         return cls(
             environment=str(data.get("environment", "dev")),

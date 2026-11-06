@@ -1,7 +1,11 @@
 """FIX-11-REDIS: Rate Limit backend (memory | redis)."""
 from __future__ import annotations
-import logging, threading, time
+
+import logging
+import threading
+import time
 from collections import defaultdict, deque
+
 logger = logging.getLogger('fxars.api.rate_limit')
 
 
@@ -18,15 +22,19 @@ class MemoryRateLimiter:
             bucket = self._hits[key]
             while bucket and now - bucket[0] > self.window:
                 bucket.popleft()
-            if len(bucket) >= self.limit: return False
-            bucket.append(now); return True
+            if len(bucket) >= self.limit:
+                return False
+            bucket.append(now)
+            return True
 
     def hits_for(self, key):
         now = time.monotonic()
         with self._lock:
             bucket = self._hits.get(key)
-            if bucket is None: return 0
-            while bucket and now - bucket[0] > self.window: bucket.popleft()
+            if bucket is None:
+                return 0
+            while bucket and now - bucket[0] > self.window:
+                bucket.popleft()
             return len(bucket)
 
     def snapshot(self):
@@ -34,8 +42,10 @@ class MemoryRateLimiter:
         with self._lock:
             result = {}
             for key, bucket in list(self._hits.items()):
-                while bucket and now - bucket[0] > self.window: bucket.popleft()
-                if bucket: result[key] = len(bucket)
+                while bucket and now - bucket[0] > self.window:
+                    bucket.popleft()
+                if bucket:
+                    result[key] = len(bucket)
             return result
 
 
@@ -75,7 +85,8 @@ class RedisRateLimiter:
         result = {}
         for full in self._client.scan_iter(match=f'{self.prefix}*', count=200):
             count = self._client.zcard(full)
-            if count: result[full[len(self.prefix):]] = int(count)
+            if count:
+                result[full[len(self.prefix):]] = int(count)
         return result
 
 

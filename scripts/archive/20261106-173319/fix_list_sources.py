@@ -1,8 +1,8 @@
 # C:\FX\fix_list_sources.py
 """Fix InstrumentRepository.list_sources — priority is in payload, not a column."""
-from pathlib import Path
-import shutil
 import datetime
+import shutil
+from pathlib import Path
 
 ROOT = Path(r'C:\FX')
 stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -41,6 +41,7 @@ path.write_text(text, encoding='utf-8')
 print('OK: list_sources patched')
 
 import py_compile
+
 try:
     py_compile.compile(str(path), doraise=True)
     print('syntax OK')

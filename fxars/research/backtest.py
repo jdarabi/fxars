@@ -9,10 +9,11 @@
 from __future__ import annotations
 
 import bisect
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Sequence
+from typing import Any
 
 from fxars.config.settings import AnalysisSettings, BacktestSettings
 from fxars.core.hashing import sha256_obj
@@ -77,7 +78,7 @@ class BacktestConfig:
         *,
         overrides: dict[str, Any] | None = None,
         min_signal_strength: float = 0.30,
-    ) -> "BacktestConfig":
+    ) -> BacktestConfig:
         base = cls(
             initial_equity=settings.initial_equity,
             risk_per_trade=settings.risk_per_trade,
@@ -210,9 +211,6 @@ class BacktestEngine:
         اما محاسبه از قبل انجام شده و در simulate فقط «نگاه» می‌کنیم.
         """
         from fxars.analysis.context import IndicatorSet
-        from fxars.analysis.structure import StructureModule
-        from fxars.analysis.engine import AnalysisOutcome
-        from fxars.analysis.structure import StructureResult
 
         # یک بار Indicator روی کل سری
         self._precomputed_indicators = IndicatorSet.build(list(candles), self.analysis)
@@ -221,8 +219,6 @@ class BacktestEngine:
         # ساده‌ترین راه: پنجره کامل را بگیریم، اما StructureModule خودش causal است
         # (swing فقط بعد از تأیید در i+k ثبت می‌شود). پس یک بار روی کل سری اجرا می‌کنیم
         # و در هر کندل، فیلتر می‌کنیم که فقط شواهد با available_at <= available_at[i] را ببینیم.
-        from fxars.analysis.context import AnalysisContext
-        from fxars.analysis.evidence import EvidenceFactory
 
         # ساده‌تر: در هر کندل، یک AnalysisContext سبک با کندل‌های [0..i] بسازیم
         # اما برای performance، فقط از StructureModule استفاده می‌کنیم، نه کل Engine.
@@ -265,7 +261,7 @@ class BacktestEngine:
                 from fxars.research.regime import classify_regimes
 
                 labels = classify_regimes(candles)
-                regime_labels = {c.open_time: lb.regime for c, lb in zip(candles, labels)}
+                regime_labels = {c.open_time: lb.regime for c, lb in zip(candles, labels, strict=False)}
             except Exception:
                 regime_labels = None
 
@@ -418,9 +414,9 @@ class BacktestEngine:
     ) -> dict[str, Any] | None:
         # FIX-05-BACKTEST-PARITY: استفاده از همان ScenarioBuilder زنده
         try:
-            from fxars.analysis.engine import AnalysisOutcome
             from fxars.analysis.context import IndicatorSet
-            from fxars.analysis.structure import StructureResult, Swing
+            from fxars.analysis.engine import AnalysisOutcome
+            from fxars.analysis.structure import StructureResult
             # FIX-09-USE-PRECOMPUTED: IndicatorSet از cache یا ساخت مجدد
             if self._precomputed_indicators is not None:
                 # ساخت یک IndicatorSet با آرایه‌های برش‌خورده تا index

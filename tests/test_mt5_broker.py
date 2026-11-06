@@ -8,10 +8,9 @@ from __future__ import annotations
 import sys
 import types
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path as _P
-from unittest.mock import MagicMock
 
 _ROOT = _P(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
@@ -38,7 +37,7 @@ def _make_intent(
         volume=Decimal(volume),
         stop_loss=Decimal("1.08000"),
         take_profit=Decimal("1.09000"),
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
         status=OrderStatus.SUBMITTED,
         phase=Phase.DEMO,
     )

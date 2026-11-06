@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import re
 import threading
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from typing import Any, Iterator, Sequence
+from typing import Any
 
 from fxars.storage.postgres_dialect import translate as _translate_dialect
 
@@ -119,7 +120,7 @@ class PostgresDatabase:
         return next(iter(row.values()), None)
 
     @contextmanager
-    def transaction(self) -> Iterator["PostgresDatabase"]:
+    def transaction(self) -> Iterator[PostgresDatabase]:
         with self._lock:
             if self._depth == 0:
                 self._conn.execute("BEGIN")
@@ -153,7 +154,7 @@ class PostgresDatabase:
             except Exception:
                 pass
 
-    def __enter__(self) -> "PostgresDatabase":
+    def __enter__(self) -> PostgresDatabase:
         return self
 
     def __exit__(self, *exc) -> None:

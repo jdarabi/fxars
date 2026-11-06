@@ -11,9 +11,8 @@ from fxars.analysis.context import AnalysisContext, IndicatorSet
 from fxars.analysis.engine import AnalysisEngine
 from fxars.analysis.evidence import EvidenceFactory
 from fxars.analysis.structure import StructureModule, detect_breaks, detect_fvgs, find_swings
-from fxars.data.synthetic import generate_candles
 from fxars.domain.enums import Direction, EvidenceFamily
-from fxars.domain.models import Candle
+
 from tests.helpers import make_env
 
 

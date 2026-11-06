@@ -9,13 +9,13 @@ from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from fxars.analysis.engine import AnalysisEngine
 from fxars.api.server import ApiApp, ApiRequest
 from fxars.core.errors import PhaseViolationError
 from fxars.decision.scenario import ScenarioBuilder
-from fxars.domain.enums import DecisionAction, Direction, EvidenceFamily, ScenarioStatus
+from fxars.domain.enums import DecisionAction, Direction
 from fxars.domain.models import Decision
 from fxars.research.protocol import assert_disjoint, split_segments
+
 from tests.helpers import make_env
 
 
@@ -88,8 +88,8 @@ class AcceptanceTests(unittest.TestCase):
 
     # AC-06
     def test_ac06_risk_gate_rejects_missing_account(self) -> None:
-        from fxars.risk.gate import RiskContext, RiskGate
         from fxars.domain.models import Candle
+        from fxars.risk.gate import RiskContext, RiskGate
 
         scenario = self.analysis.scenario
         if scenario is None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path as _P
 
@@ -18,6 +18,7 @@ from fxars.domain.models import BrokerOrder
 from fxars.execution.reconciliation import ReconciliationService
 from fxars.platform import Platform
 from fxars.storage.db import Database
+
 from tests.helpers import Clock, make_env
 
 
@@ -27,10 +28,11 @@ class _AlwaysUnknownBroker:
     name = "always_unknown"
 
     def submit(self, intent, *, price, pip_size, now=None):
-        from datetime import datetime as _dt, timezone as _tz
+        from datetime import datetime as _dt
+
         from fxars.core.ids import stable_id
 
-        moment = now or _dt.now(_tz.utc)
+        moment = now or _dt.now(UTC)
         order = BrokerOrder(
             broker_order_id=stable_id("bo", intent.client_order_id, "unknown", length=20),
             intent_id=intent.intent_id,
@@ -162,7 +164,7 @@ class FilePersistenceTests(unittest.TestCase):
                 "environment": "dev",
             })
             calendar = TradingCalendar(default_holidays())
-            start = datetime(2026, 2, 1, 22, 0, tzinfo=timezone.utc)
+            start = datetime(2026, 2, 1, 22, 0, tzinfo=UTC)
             clock = Clock(start)
             platform = Platform(
                 settings, db=Database(str(db_path)),

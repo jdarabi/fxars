@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC
 from decimal import Decimal
 
 from fxars.core.errors import FxarsError, RiskRejectedError
@@ -17,7 +17,7 @@ class TimeTests(unittest.TestCase):
     def test_parse_and_format_roundtrip(self) -> None:
         text = "2026-10-30T10:00:00Z"
         moment = parse_ts(text)
-        self.assertEqual(moment.tzinfo, timezone.utc)
+        self.assertEqual(moment.tzinfo, UTC)
         self.assertEqual(format_ts(moment), text)
 
     def test_naive_is_utc(self) -> None:

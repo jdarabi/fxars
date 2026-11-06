@@ -2,9 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
-
-from fxars.domain.models import Candle
 
 
 @dataclass(frozen=True)

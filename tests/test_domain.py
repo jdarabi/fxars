@@ -6,7 +6,6 @@ import unittest
 from datetime import timedelta
 from decimal import Decimal
 
-from fxars.core.hashing import sha256_obj
 from fxars.domain.enums import Direction, QualityStatus, ScenarioStatus
 from fxars.domain.models import Candle, EconomicEvent, Instrument, PriceZone, Scenario
 

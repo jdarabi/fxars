@@ -4,23 +4,24 @@ from __future__ import annotations
 
 import json
 import re
-import threading
 import time
-from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from fxars.api.metrics import get_registry
-from fxars.api.rate_limit import (
-    MemoryRateLimiter as RateLimiter,
-    RedisRateLimiter,
-    build_rate_limiter,
-)
 from fxars.api.metrics_dashboard import render_metrics_dashboard
 from fxars.api.openapi import docs_html, openapi_spec
+
+# FIX-E402-LAZY: re-export for backward compatibility (tests import from here)
+from fxars.api.rate_limit import (  # noqa: F401
+    MemoryRateLimiter as RateLimiter,
+)
+from fxars.api.rate_limit import (
+    build_rate_limiter,
+)
 from fxars.core.context import correlation_scope, current_correlation_id
 from fxars.core.errors import (
     AuthenticationError,
@@ -190,7 +191,7 @@ class ApiApp:
                 if not self.limiter.allow(user_key):
                     raise RateLimitedError()
             if request.method == "POST" and not public:
-                return self._with_idempotency(request, user, lambda: handler(request, match.groupdict(), user))
+                return self._with_idempotency(request, user, lambda h=handler, m=match, u=user: h(request, m.groupdict(), u))
             return handler(request, match.groupdict(), user)
         if matched_methods:
             allow = ", ".join(sorted(matched_methods | {"OPTIONS"}))
@@ -300,9 +301,8 @@ class ApiApp:
 
     def _live_chart(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         """Live chart data: candles + indicators + active scenarios."""
-        from fxars.analysis import indicators as ind
+
         from fxars.analysis.context import IndicatorSet
-        from decimal import Decimal
 
         instrument_id = request.one("instrument")
         timeframe = (request.one("timeframe") or "H1").upper()

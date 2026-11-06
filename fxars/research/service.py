@@ -2,26 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from fxars.analysis.engine import AnalysisEngine, AnalysisOutcome
 from fxars.audit.audit import AuditAction, AuditLog
 from fxars.audit.outbox import EventType, Outbox
 from fxars.config.settings import Settings
-from fxars.core.hashing import sha256_obj
 from fxars.core.ids import stable_id
 from fxars.core.numerics import annualization_factor
-from fxars.core.timeutil import format_ts, parse_ts, utcnow
+from fxars.core.timeutil import parse_ts
 from fxars.data.snapshot import snapshot_id
 from fxars.domain.enums import BacktestSegment, QualityStatus
 from fxars.domain.models import BacktestRun, Candle, Instrument
 from fxars.research.backtest import BacktestConfig, BacktestEngine, BacktestOutput, EvidenceTimeline
 from fxars.research.calibration import calibration_report
-from fxars.research.metrics import compute_metrics, equity_returns
+from fxars.research.metrics import equity_returns
 from fxars.research.overfitting import deflated_sharpe_ratio, probability_of_backtest_overfitting
-from fxars.research.protocol import split_segments, segment_range, ValidationSplit
+from fxars.research.protocol import ValidationSplit, segment_range, split_segments
 from fxars.storage.repositories import (
     BacktestRepository,
     CandleRepository,

@@ -7,13 +7,12 @@ import logging
 import re
 import sys
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from fxars.core.context import current_correlation_id
 from fxars.core.serde import jsonable
-from fxars.core.timeutil import utcnow
 
 _SECRET_KEYS = {
     "password", "passwd", "token", "secret", "authorization",
@@ -58,7 +57,7 @@ def _redact(data: Any) -> Any:
             )
             for key, value in data.items()
         }
-    if isinstance(data, (list, tuple, set, frozenset)):
+    if isinstance(data, list | tuple | set | frozenset):
         return [_redact(item) for item in data]
     if isinstance(data, str):
         return _redact_string(data)
@@ -70,7 +69,7 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
-            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            "ts": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             "level": record.levelname,
             "logger": record.name,
             "message": _redact_string(record.getMessage()),
@@ -124,7 +123,7 @@ class ErrorFileHandler(logging.Handler):
         if self.max_lines <= 0:
             return
         try:
-            with open(self.path, "r", encoding="utf-8") as handle:
+            with open(self.path, encoding="utf-8") as handle:
                 lines = handle.readlines()
             if len(lines) > self.max_lines:
                 with open(self.path, "w", encoding="utf-8") as handle:

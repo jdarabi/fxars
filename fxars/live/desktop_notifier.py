@@ -17,7 +17,7 @@ class DesktopConfig:
     sound: bool = True
 
     @classmethod
-    def from_env(cls) -> "DesktopConfig":
+    def from_env(cls) -> DesktopConfig:
         return cls()
 
 

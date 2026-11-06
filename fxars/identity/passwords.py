@@ -51,7 +51,7 @@ class SecretBox:
         nonce = secrets.token_bytes(16)
         data = plaintext.encode("utf-8")
         stream = self._keystream(nonce, len(data))
-        ciphertext = bytes(a ^ b for a, b in zip(data, stream))
+        ciphertext = bytes(a ^ b for a, b in zip(data, stream, strict=True))
         tag = hmac_sha256(self._key, nonce + ciphertext)[:16]
         return base64.urlsafe_b64encode(nonce + ciphertext + tag).decode("ascii")
 
@@ -62,4 +62,4 @@ class SecretBox:
         if not hmac.compare_digest(tag, expected):
             raise ValueError("tag جعبه اسرار معتبر نیست.")
         stream = self._keystream(nonce, len(ciphertext))
-        return bytes(a ^ b for a, b in zip(ciphertext, stream)).decode("utf-8")
+        return bytes(a ^ b for a, b in zip(ciphertext, stream, strict=True)).decode("utf-8")

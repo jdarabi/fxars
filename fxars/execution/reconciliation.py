@@ -1,9 +1,10 @@
 """Reconciliation for orders in UNKNOWN state."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from fxars.audit.audit import AuditLog
 from fxars.audit.outbox import EventType, Outbox

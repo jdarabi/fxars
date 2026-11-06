@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from fxars.config.settings import AnalysisSettings
 from fxars.core.numerics import clamp
@@ -89,7 +89,7 @@ def aggregate_evidence(
     as_of: datetime,
     timeframe: str,
 ) -> Decision:
-    tf = Timeframe.parse(timeframe)
+    Timeframe.parse(timeframe)
     usable = filter_usable(evidences, as_of=as_of, timeframe=timeframe, settings=settings)
     if not usable:
         return Decision(

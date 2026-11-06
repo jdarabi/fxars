@@ -1,5 +1,5 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 # ===========================================================================
 # 1) schema.sql: افزودن ستون‌ها

@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from fxars.analysis.engine import AnalysisEngine
 from fxars.audit.audit import AuditLog
@@ -23,7 +24,6 @@ from fxars.decision.state_machine import ScenarioStateMachine
 from fxars.decision.trigger import TriggerEvaluator
 from fxars.domain.enums import BacktestSegment, Role, ScenarioStatus
 from fxars.domain.models import DataSource
-from fxars.execution.paper_broker import PaperBroker
 from fxars.execution.service import ExecutionService
 from fxars.identity.service import IdentityService
 from fxars.instruments.calendar import TradingCalendar, default_holidays
@@ -58,8 +58,6 @@ from fxars.storage.repositories import (
     SystemStateRepository,
     UserRepository,
 )
-
-
 
 
 def _select_broker(settings):
@@ -260,7 +258,7 @@ class Platform:
     def close(self) -> None:
         self.db.close()
 
-    def __enter__(self) -> "Platform":
+    def __enter__(self) -> Platform:
         return self
 
     def __exit__(self, *exc) -> None:

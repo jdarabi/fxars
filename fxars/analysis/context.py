@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from functools import cached_property
-from typing import Sequence
 
 from fxars.analysis import indicators as ind
 from fxars.config.settings import AnalysisSettings
 from fxars.core.numerics import to_decimal
 from fxars.core.timeutil import format_ts
-from fxars.domain.enums import SessionName, Timeframe
+from fxars.domain.enums import Timeframe
 from fxars.domain.models import Candle, EconomicEvent, Instrument
 from fxars.instruments.calendar import TradingCalendar
 
@@ -29,7 +29,7 @@ class IndicatorSet:
     real_vol_long: tuple[ind.Number, ...]
 
     @classmethod
-    def build(cls, candles: Sequence[Candle], settings: AnalysisSettings) -> "IndicatorSet":
+    def build(cls, candles: Sequence[Candle], settings: AnalysisSettings) -> IndicatorSet:
         closes = [float(candle.close) for candle in candles]
         highs = [float(candle.high) for candle in candles]
         lows = [float(candle.low) for candle in candles]

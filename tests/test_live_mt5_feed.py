@@ -62,7 +62,7 @@ class MT5FeedLiveTests(unittest.TestCase):
         candles = self.feed.fetch_recent('EURUSD', 'H1', count=20)
         if len(candles) < 5:
             self.skipTest('not enough candles')
-        last = candles[-1]
+        candles[-1]
         older = candles[-5]
         new = self.feed.fetch_new('EURUSD', 'H1', since=older.open_time, count=20)
         for c in new:

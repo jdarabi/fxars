@@ -1,5 +1,5 @@
-from pathlib import Path
 from datetime import date
+from pathlib import Path
 
 p = Path('C:/FX/CHANGELOG.md')
 text = p.read_text(encoding='utf-8')

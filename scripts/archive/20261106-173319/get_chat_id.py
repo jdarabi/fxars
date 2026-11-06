@@ -1,7 +1,6 @@
 ﻿"""Get Telegram chat_id from bot updates. Run after sending a message to the bot."""
 import os
 import sys
-import time
 
 try:
     import requests

@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_TIMEFRAMES = ["M15", "H1", "H4"]
 DEFAULT_MINUTE_OFFSETS = [0, 15, 30, 45]
 DEFAULT_ACTIVE_HOURS_UTC = list(range(24))
@@ -21,7 +20,7 @@ class ScheduleConfig:
     active_days: list[str] = field(default_factory=lambda: list(DEFAULT_ACTIVE_DAYS))
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ScheduleConfig":
+    def from_dict(cls, data: dict[str, Any]) -> ScheduleConfig:
         data = data or {}
         return cls(
             mode=str(data.get("mode", "always")).lower(),
@@ -65,7 +64,7 @@ class LiveConfig:
     source_id: str = "mt5"
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "LiveConfig":
+    def from_dict(cls, data: dict[str, Any]) -> LiveConfig:
         instruments = list(data.get('instruments') or [data.get('instrument', 'EURUSD')])
         data = data or {}
         return cls(
@@ -82,7 +81,7 @@ class LiveConfig:
         )
 
     @classmethod
-    def load(cls, path: str | Path) -> "LiveConfig":
+    def load(cls, path: str | Path) -> LiveConfig:
         with open(path, encoding="utf-8") as f:
             return cls.from_dict(json.load(f))
 

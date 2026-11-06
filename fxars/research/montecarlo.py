@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import random
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from fxars.core.numerics import mean, percentile
 from fxars.research.metrics import compute_metrics
@@ -34,7 +35,7 @@ def monte_carlo_trades(
             (float(trade.get("commission", 0.0)) + float(trade.get("slippage_cost", 0.0))) * (cost_stress - 1.0)
             for trade in (trades[rng_sequence.randrange(len(trades))] for _ in range(len(trades)))
         ]
-        adjusted = [pnl - cost for pnl, cost in zip(sample, extra_costs)]
+        adjusted = [pnl - cost for pnl, cost in zip(sample, extra_costs, strict=False)]
         equity = initial_equity
         peak = initial_equity
         max_dd = 0.0

@@ -10,6 +10,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from fxars.api.metrics import MetricsRegistry
+
 from tests.test_http_integration import HttpServerFixture, _request
 
 

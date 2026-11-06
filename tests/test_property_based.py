@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -35,7 +35,7 @@ def _utc_datetimes(start: str = "2020-01-01T00:00:00Z", end: str = "2030-01-01T0
     return st.datetimes(
         min_value=parse_ts(start).replace(tzinfo=None),
         max_value=parse_ts(end).replace(tzinfo=None),
-        timezones=st.just(timezone.utc),
+        timezones=st.just(UTC),
     )
 
 
@@ -130,12 +130,12 @@ class CandleInvariantTests(unittest.TestCase):
         low = min(open_price, close) - wick
         common = dict(
             instrument_id="EURUSD", source_id="test", timeframe="H1",
-            open_time=datetime(2026, 2, 2, 10, tzinfo=timezone.utc),
+            open_time=datetime(2026, 2, 2, 10, tzinfo=UTC),
             open=open_price, high=high, low=low, close=close,
-            available_at=datetime(2026, 2, 2, 11, 0, 30, tzinfo=timezone.utc),
+            available_at=datetime(2026, 2, 2, 11, 0, 30, tzinfo=UTC),
         )
-        a = Candle(ingested_at=datetime(2026, 2, 2, 11, 0, 31, tzinfo=timezone.utc), **common)
-        b = Candle(ingested_at=datetime(2026, 2, 2, 11, 0, 32, tzinfo=timezone.utc), **common)
+        a = Candle(ingested_at=datetime(2026, 2, 2, 11, 0, 31, tzinfo=UTC), **common)
+        b = Candle(ingested_at=datetime(2026, 2, 2, 11, 0, 32, tzinfo=UTC), **common)
         self.assertEqual(a.digest(), b.digest())
         self.assertGreaterEqual(a.high, a.close)
         self.assertGreaterEqual(a.high, a.open)
@@ -147,11 +147,11 @@ class CandleInvariantTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Candle(
                 instrument_id="EURUSD", source_id="test", timeframe="H1",
-                open_time=datetime(2026, 2, 2, 10, tzinfo=timezone.utc),
+                open_time=datetime(2026, 2, 2, 10, tzinfo=UTC),
                 open=Decimal("1.0850"), high=Decimal("1.0860"),
                 low=Decimal("1.0840"), close=Decimal("1.0855"),
-                ingested_at=datetime(2026, 2, 2, 11, tzinfo=timezone.utc),
-                available_at=datetime(2026, 2, 2, 9, tzinfo=timezone.utc),
+                ingested_at=datetime(2026, 2, 2, 11, tzinfo=UTC),
+                available_at=datetime(2026, 2, 2, 9, tzinfo=UTC),
             )
 
 

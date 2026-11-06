@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
-from typing import Sequence
 
-from fxars.analysis import indicators as ind
 from fxars.analysis.context import AnalysisContext, IndicatorSet
 from fxars.analysis.evidence import EvidenceFactory
 from fxars.analysis.fundamental import FundamentalModule
@@ -17,7 +15,6 @@ from fxars.analysis.regime import MomentumModule, TrendModule, VolatilityModule,
 from fxars.analysis.structure import StructureModule, StructureResult
 from fxars.config.settings import AnalysisSettings
 from fxars.core.hashing import sha256_obj
-from fxars.core.numerics import clamp
 from fxars.core.timeutil import format_ts
 from fxars.domain.models import Candle, EconomicEvent, Evidence, Instrument
 from fxars.instruments.calendar import TradingCalendar

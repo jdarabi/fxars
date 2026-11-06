@@ -6,9 +6,10 @@ from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
-from fxars.domain.enums import Direction, QualityStatus, ScenarioStatus
+from fxars.domain.enums import Direction, ScenarioStatus
 from fxars.domain.models import Candle, EconomicEvent, PriceZone, Scenario
-from tests.helpers import ANALYST_PASSWORD, make_env
+
+from tests.helpers import make_env
 
 
 class Fix02VerdictSeverityTests(unittest.TestCase):
@@ -55,12 +56,12 @@ class Fix04FundamentalHistoryTests(unittest.TestCase):
         self.env.platform.events.save(event)
 
         # اجرای تحلیل
-        result = self.env.analyze()
+        self.env.analyze()
 
         # علاوه بر نتیجه ذخیره‌شده، Engine را مستقیم اجرا می‌کنیم تا ALL Evidenceها را ببینیم
         # (AnalysisService فقط Evidenceهای اخیر را ذخیره می‌کند)
-        from fxars.data.snapshot import snapshot_id
         from datetime import timedelta as _td
+
         from fxars.domain.enums import QualityStatus as _QS
 
         candles = [
@@ -164,6 +165,7 @@ class Fix07ApiValidationTests(unittest.TestCase):
 
     def _post(self, path: str, body: dict, idem: str) -> int:
         import json
+
         from fxars.api.server import ApiRequest
         request = ApiRequest(
             method="POST", path=path, query={},
@@ -200,6 +202,7 @@ class Fix12CandlesPaginationTests(unittest.TestCase):
     def _get(self, path: str) -> dict:
         import json
         from urllib.parse import parse_qs, urlparse
+
         from fxars.api.server import ApiRequest
         parsed = urlparse(path)
         request = ApiRequest(

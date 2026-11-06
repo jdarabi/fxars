@@ -1,8 +1,8 @@
 # C:\FX\install_live_phase4.py
 """Phase 4: CLI fxars live."""
-from pathlib import Path
-import shutil
 import datetime
+import shutil
+from pathlib import Path
 
 ROOT = Path(r'C:\FX')
 stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')

@@ -1,6 +1,7 @@
 # C:\FX\test_analysis_mt5.py
+from datetime import UTC, datetime
+
 from fxars.platform import Platform
-from datetime import datetime, timezone
 
 p = Platform()
 p.bootstrap(create_users=False)
@@ -18,7 +19,7 @@ try:
 
     latest = c[-1]
     as_of = latest.available_at
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
 
     print(f"latest_candle: {latest.open_time.isoformat()}")
     print(f"available_at : {as_of.isoformat()}")

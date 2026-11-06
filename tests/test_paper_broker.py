@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path as _P
 
@@ -32,7 +32,7 @@ def _intent(
         volume=Decimal(volume),
         stop_loss=Decimal("1.0800"),
         take_profit=Decimal("1.0900"),
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
         status=OrderStatus.SUBMITTED,
         phase=Phase.PAPER,
     )

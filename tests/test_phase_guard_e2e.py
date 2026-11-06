@@ -11,8 +11,9 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from fxars.core.errors import PhaseViolationError
-from fxars.domain.enums import DecisionAction, OrderStatus, Phase
+from fxars.domain.enums import Phase
 from fxars.risk.account import demo_account
+
 from tests.helpers import make_env
 
 

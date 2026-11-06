@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  trades={base_summary['trade_count']} net={base_summary['net_profit']:.2f} "
               f"sharpe={base_summary['sharpe']} dsr={base_summary['dsr']}")
 
-        print(f"Filtered: TRENDING_UP+DOWN")
+        print("Filtered: TRENDING_UP+DOWN")
         filtered = platform.run_backtest(
             args.instrument, args.timeframe,
             overrides={"allowed_regimes": ["TRENDING_UP", "TRENDING_DOWN"]},

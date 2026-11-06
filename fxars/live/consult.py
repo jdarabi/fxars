@@ -5,15 +5,15 @@ import argparse
 import logging
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from fxars.execution.trailing import apply_trailing_sl as _apply_trailing_sl
 from fxars.live.advisor import Advice, AdviceAction, generate_advice
 from fxars.live.config import LiveConfig
 from fxars.live.desktop_notifier import DesktopConfig, DesktopNotifier
 from fxars.live.mt5_feed import MT5Feed, MT5UnavailableError
 from fxars.live.notifier import TelegramConfig, TelegramNotifier
-from fxars.execution.trailing import apply_trailing_sl as _apply_trailing_sl
 
 logger = logging.getLogger("fxars.live.consult")
 
@@ -71,7 +71,7 @@ class Consultant:
         self._signal_times: list[datetime] = []
 
     def _rate_ok(self) -> bool:
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=1)
+        cutoff = datetime.now(tz=UTC) - timedelta(hours=1)
         self._signal_times = [t for t in self._signal_times if t > cutoff]
         return len(self._signal_times) < self.config.max_signals_per_hour
 
@@ -102,7 +102,7 @@ class Consultant:
                     self.platform.ingestion.ingest(
                         candles, instrument_id=symbol,
                         source_id=self.config.source_id,
-                        now=datetime.now(tz=timezone.utc),
+                        now=datetime.now(tz=UTC),
                     )
 
                     result = self.platform.run_analysis(symbol, tf, actor="consultant")
@@ -163,11 +163,11 @@ class Consultant:
             pass
 
         if not self._rate_ok():
-            print(f"           -> AutoTrade skipped (rate limit)", file=sys.stderr)
+            print("           -> AutoTrade skipped (rate limit)", file=sys.stderr)
             return
 
         if sc is None:
-            print(f"           -> AutoTrade skipped (no scenario)", file=sys.stderr)
+            print("           -> AutoTrade skipped (no scenario)", file=sys.stderr)
             return
 
         # FIX-SCENARIO: if DRAFT, try evaluate; if still DRAFT, find existing WATCH/ARMED
@@ -192,7 +192,7 @@ class Consultant:
                 pass
 
         if sc is None or sc.status.value not in ('WATCH', 'ARMED', 'TRIGGERED'):
-            print(f'           -> AutoTrade skipped (no valid scenario)', file=sys.stderr)
+            print('           -> AutoTrade skipped (no valid scenario)', file=sys.stderr)
             return
 
 
@@ -202,9 +202,11 @@ class Consultant:
             return
 
         try:
-            from fxars.risk.account import demo_account
             from decimal import Decimal
+
             import MetaTrader5 as mt5
+
+            from fxars.risk.account import demo_account
 
             si = mt5.symbol_info(symbol)
             if si is None:
@@ -212,7 +214,7 @@ class Consultant:
                 return
             tick = mt5.symbol_info_tick(symbol)
             if tick is None:
-                print(f"           -> AutoTrade skipped (no tick)", file=sys.stderr)
+                print("           -> AutoTrade skipped (no tick)", file=sys.stderr)
                 return
 
             # Determine pip_size and rate
@@ -248,13 +250,21 @@ class Consultant:
             if result.status.value == "FILLED":
                 print(f"           -> AutoTrade FILLED: {intent.instrument_id} {intent.side.value} {intent.volume} lot", file=sys.stderr)
                 self._last_signals[key] = advice.action.value
-                self._signal_times.append(datetime.now(tz=timezone.utc))
+                self._signal_times.append(datetime.now(tz=UTC))
                 if self.desktop:
-                    try: self.desktop.send_advice(advice)
-                    except Exception: pass
+                    try:
+                        self.desktop.send_advice(advice)
+                    except Exception:
+                        pass
                 if self.telegram:
-                    try: self.telegram.send_message(_format_advice_telegram(advice))
-                    except Exception: pass
+                    try:
+                        self.telegram.send_message(_format_advice_telegram(advice))
+                    except Exception:
+                        pass
+                    try:
+                        self.telegram.send_message(_format_advice_telegram(advice))
+                    except Exception:
+                        pass
             else:
                 print(f"           -> AutoTrade {result.status.value}", file=sys.stderr)
         except Exception as exc:
@@ -280,7 +290,7 @@ class Consultant:
             except Exception as exc:
                 print(f"           -> Telegram error: {exc}", file=sys.stderr)
         self._last_signals[key] = advice.action.value
-        self._signal_times.append(datetime.now(tz=timezone.utc))
+        self._signal_times.append(datetime.now(tz=UTC))
 
     def _print_signal(self, info: dict[str, Any], advice: Advice) -> None:
         symbol = info["symbol"]
@@ -323,8 +333,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.interval:
         config.interval_seconds = args.interval
 
-    from fxars.platform import Platform
     from fxars.config.settings import Settings
+    from fxars.platform import Platform
     platform = Platform(Settings.load())
 
     if args.auto_trade and not platform.settings.execution_enabled:
@@ -363,8 +373,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Interval:    {config.interval_seconds}s ({config.interval_seconds//60}min)", file=sys.stderr)
     print(f"Max signals/hour: {config.max_signals_per_hour}", file=sys.stderr)
     if args.auto_trade:
-        print(f"⚠️  AUTO-TRADE ENABLED: orders will be sent to MT5", file=sys.stderr)
-    print(f"\nPress Ctrl+C to stop.\n", file=sys.stderr)
+        print("⚠️  AUTO-TRADE ENABLED: orders will be sent to MT5", file=sys.stderr)
+    print("\nPress Ctrl+C to stop.\n", file=sys.stderr)
 
     consultant = Consultant(
         platform=platform, feed=feed, config=config,

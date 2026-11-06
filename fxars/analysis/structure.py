@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from decimal import Decimal
 
 from fxars.analysis import indicators as ind
@@ -16,7 +15,7 @@ from fxars.analysis.evidence import EvidenceFactory
 from fxars.core.numerics import clamp
 from fxars.core.timeutil import format_ts
 from fxars.domain.enums import Direction, EvidenceFamily
-from fxars.domain.models import Candle, Evidence, PriceZone
+from fxars.domain.models import Candle, PriceZone
 
 MODULE_VERSION = "1.0.0"
 

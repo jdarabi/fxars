@@ -1,6 +1,6 @@
 # C:\FX\fix_live_subparser.py
-from pathlib import Path
 import py_compile
+from pathlib import Path
 
 path = Path(r'C:\FX\fxars\cli\main.py')
 text = path.read_text(encoding='utf-8')

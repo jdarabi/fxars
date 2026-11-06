@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 from fxars.data.providers import read_candle_csv, write_candle_csv
 from fxars.data.quality import DataQualityEngine
 from fxars.data.snapshot import candles_digest, snapshot_id
-from fxars.data.synthetic import generate_candles
 from fxars.data.validation import CandleValidator
 from fxars.domain.enums import QualityStatus
 from fxars.instruments.calendar import TradingCalendar, default_holidays
+
 from tests.helpers import make_env
 
-UTC = timezone.utc
+UTC = UTC
 
 
 class ValidationTests(unittest.TestCase):

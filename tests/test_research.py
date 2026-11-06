@@ -16,6 +16,7 @@ from fxars.research.protocol import (
     split_segments,
     walk_forward_windows,
 )
+
 from tests.helpers import make_env
 
 

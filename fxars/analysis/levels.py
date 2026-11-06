@@ -12,8 +12,7 @@ from decimal import Decimal
 from fxars.analysis.context import AnalysisContext
 from fxars.analysis.evidence import EvidenceFactory
 from fxars.core.numerics import clamp
-from fxars.core.timeutil import format_ts
-from fxars.domain.enums import Direction, EvidenceFamily, SessionName, Timeframe
+from fxars.domain.enums import Direction, EvidenceFamily, SessionName
 from fxars.domain.models import Candle, Evidence, PriceZone
 
 MODULE_VERSION = "1.0.0"

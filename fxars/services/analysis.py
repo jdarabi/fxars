@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Callable
 
 from fxars.analysis.engine import AnalysisEngine, AnalysisOutcome
 from fxars.audit.audit import AuditAction, AuditLog
@@ -13,7 +13,8 @@ from fxars.config.settings import Settings
 from fxars.core.context import current_correlation_id
 from fxars.core.hashing import sha256_obj
 from fxars.core.ids import stable_id
-from fxars.core.timeutil import format_ts, timeframe_delta, utcnow
+from fxars.core.logging_setup import get_logger
+from fxars.core.timeutil import format_ts, timeframe_delta
 from fxars.data.snapshot import snapshot_id
 from fxars.decision.aggregation import aggregate_evidence
 from fxars.decision.scenario import ScenarioBuilder
@@ -27,8 +28,6 @@ from fxars.domain.models import (
     ScenarioTransition,
 )
 from fxars.instruments.calendar import TradingCalendar
-
-from fxars.core.logging_setup import get_logger
 
 logger = get_logger("services.analysis")
 from fxars.storage.repositories import (
@@ -513,4 +512,3 @@ class AnalysisService:
             scenario=scenario,
             scenario_reason=scenario_reason,
         )
-

@@ -26,7 +26,7 @@ class Timeframe(str, Enum):
         return timeframe_delta(self.value)
 
     @classmethod
-    def parse(cls, value: "str | Timeframe") -> "Timeframe":
+    def parse(cls, value: str | Timeframe) -> Timeframe:
         if isinstance(value, Timeframe):
             return value
         try:
@@ -59,7 +59,7 @@ class Direction(str, Enum):
         return {"LONG": 1, "SHORT": -1, "NEUTRAL": 0}[self.value]
 
     @property
-    def opposite(self) -> "Direction":
+    def opposite(self) -> Direction:
         return Direction.SHORT if self is Direction.LONG else Direction.LONG if self is Direction.SHORT else Direction.NEUTRAL
 
 

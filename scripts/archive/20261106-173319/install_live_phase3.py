@@ -1,8 +1,8 @@
 # C:\FX\install_live_phase3.py
 """Phase 3: live daemon."""
-from pathlib import Path
-import shutil
 import datetime
+import shutil
+from pathlib import Path
 
 ROOT = Path(r'C:\FX')
 stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')

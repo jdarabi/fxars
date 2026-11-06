@@ -15,7 +15,6 @@ from typing import Any
 
 from fxars.core.context import current_correlation_id
 from fxars.core.hashing import sha256_obj
-from fxars.core.ids import stable_id
 from fxars.core.numerics import ZERO, quantize, to_decimal
 from fxars.core.serde import jsonable
 from fxars.core.timeutil import ensure_utc, format_ts, parse_ts
@@ -33,7 +32,6 @@ from fxars.domain.enums import (
     RiskReasonCode,
     Role,
     ScenarioStatus,
-    SessionName,
     Side,
     Timeframe,
 )
@@ -68,7 +66,7 @@ class PriceZone:
     def contains(self, price: Decimal) -> bool:
         return self.low <= price <= self.high
 
-    def overlaps(self, other: "PriceZone") -> bool:
+    def overlaps(self, other: PriceZone) -> bool:
         return self.low <= other.high and other.low <= self.high
 
     def to_dict(self) -> dict[str, str]:
@@ -142,7 +140,7 @@ class Instrument:
         return jsonable(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Instrument":
+    def from_dict(cls, data: dict[str, Any]) -> Instrument:
         payload = {key: value for key, value in data.items() if value is not None}
         if payload.get("valid_from"):
             payload["valid_from"] = parse_ts(payload["valid_from"])
@@ -286,7 +284,7 @@ class Candle:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Candle":
+    def from_dict(cls, data: dict[str, Any]) -> Candle:
         return cls(
             instrument_id=data["instrument_id"],
             source_id=data["source_id"],
@@ -373,7 +371,7 @@ class EconomicEvent:
         return jsonable(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "EconomicEvent":
+    def from_dict(cls, data: dict[str, Any]) -> EconomicEvent:
         return cls(
             event_id=data["event_id"],
             indicator=data["indicator"],
@@ -530,7 +528,7 @@ class Evidence:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Evidence":
+    def from_dict(cls, data: dict[str, Any]) -> Evidence:
         zone = data.get("price_zone")
         return cls(
             evidence_id=data["evidence_id"],
@@ -639,7 +637,7 @@ class Scenario:
         if self.direction is Direction.NEUTRAL:
             raise ValueError("سناریو باید جهت LONG یا SHORT داشته باشد")
 
-    def with_status(self, status: ScenarioStatus, *, when: datetime, risk_decision_id: str | None = None) -> "Scenario":
+    def with_status(self, status: ScenarioStatus, *, when: datetime, risk_decision_id: str | None = None) -> Scenario:
         return replace(
             self,
             status=status,
@@ -677,7 +675,7 @@ class Scenario:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Scenario":
+    def from_dict(cls, data: dict[str, Any]) -> Scenario:
         zone = data.get("entry_zone")
         return cls(
             scenario_id=data["scenario_id"],
@@ -853,7 +851,7 @@ class OrderIntent:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "OrderIntent":
+    def from_dict(cls, data: dict[str, Any]) -> OrderIntent:
         return cls(
             intent_id=data["intent_id"],
             client_order_id=data["client_order_id"],

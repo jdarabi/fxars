@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import re
 
-
 # الگوها با regex کامپایل‌شده برای performance
 _PLACEHOLDER = re.compile(r"\?")
 _INSERT_OR_REPLACE = re.compile(

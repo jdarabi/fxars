@@ -12,8 +12,8 @@ from typing import Any
 from fxars.core.context import current_correlation_id
 from fxars.core.errors import FxarsError
 from fxars.core.ids import new_id
-from fxars.core.timeutil import utcnow
 from fxars.core.logging_setup import get_logger
+from fxars.core.timeutil import utcnow
 from fxars.storage.db import Database
 from fxars.storage.repositories import OutboxRepository
 

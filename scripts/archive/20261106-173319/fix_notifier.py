@@ -1,8 +1,8 @@
 # C:\FX\fix_notifier.py
 """Fix fxars/live/notifier.py — multiline f-strings."""
-from pathlib import Path
-import shutil
 import datetime
+import shutil
+from pathlib import Path
 
 ROOT = Path(r'C:\FX')
 stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -193,6 +193,7 @@ print(f'OK: {path} rewritten ({len(content)} bytes)')
 
 # syntax check
 import py_compile
+
 try:
     py_compile.compile(str(path), doraise=True)
     print('syntax OK')

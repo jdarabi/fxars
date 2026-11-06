@@ -1,11 +1,7 @@
-﻿"""Market regime detection for backtest performance attribution."""
+"""Market regime detection for backtest performance attribution."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
-
-from fxars.domain.models import Candle
-
 
 TRENDING_UP = "TRENDING_UP"
 TRENDING_DOWN = "TRENDING_DOWN"
@@ -69,13 +65,13 @@ def _wilder_atr(candles, period):
         return [None] * n
     trs = []
     for i in range(n):
-        h = float(candles[i].high)
-        l = float(candles[i].low)
+        hi = float(candles[i].high)
+        lo = float(candles[i].low)
         if i == 0:
-            trs.append(h - l)
+            trs.append(hi - lo)
         else:
             pc = float(candles[i - 1].close)
-            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+            trs.append(max(hi - lo, abs(hi - pc), abs(lo - pc)))
     out = [None] * n
     seed = sum(trs[:period]) / period
     out[period - 1] = seed
@@ -160,7 +156,7 @@ def regime_at(labels, index):
 
 def regime_breakdown(labels, trade_entry_indices, trade_pnls):
     result = {r: {"count": 0, "wins": 0, "total_pnl": 0.0} for r in ALL_REGIMES}
-    for idx, pnl in zip(trade_entry_indices, trade_pnls):
+    for idx, pnl in zip(trade_entry_indices, trade_pnls, strict=True):
         regime = regime_at(labels, idx)
         if regime is None:
             continue

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from fxars.core.numerics import annualization_factor, mean, percentile, safe_div, stdev
 

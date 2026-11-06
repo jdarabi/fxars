@@ -10,6 +10,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from fxars.research.backtest import BacktestConfig
+
 from tests.helpers import make_env
 
 
@@ -74,7 +75,7 @@ class RegimeFilterBacktestTests(unittest.TestCase):
                 "EURUSD", "H1", source_id="demo_feed", closed_only=True,
             )
             labels = classify_regimes(candles)
-            time_to_regime = {c.open_time: lb.regime for c, lb in zip(candles, labels)}
+            time_to_regime = {c.open_time: lb.regime for c, lb in zip(candles, labels, strict=False)}
             from fxars.core.timeutil import parse_ts
             for trade in result.run.trades:
                 entry_time = parse_ts(trade["entry_time"])

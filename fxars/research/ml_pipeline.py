@@ -1,8 +1,9 @@
 ﻿"""ML pipeline: Triple Barrier labels + Purged K-Fold, end-to-end."""
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from fxars.domain.models import Candle
 from fxars.research.labeling import (

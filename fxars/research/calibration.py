@@ -11,11 +11,10 @@ This module provides:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
 
-from fxars.core.numerics import clamp, mean, safe_div
-
+from fxars.core.numerics import clamp, mean
 
 # ---------------------------------------------------------------------------
 # Basic metrics
@@ -181,7 +180,7 @@ class TemperatureScaling:
         outcomes: Sequence[int],
         *,
         grid: Sequence[float] = (0.5, 0.7, 0.85, 1.0, 1.15, 1.3, 1.5, 2.0, 3.0),
-    ) -> "TemperatureScaling":
+    ) -> TemperatureScaling:
         """Choose T minimizing LogLoss on the given set."""
         best_loss = float("inf")
         best_t = 1.0

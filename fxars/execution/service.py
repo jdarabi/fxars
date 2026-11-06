@@ -6,9 +6,10 @@ Phase Guard و Risk Gate هر دو در سطح سرویس enforce می‌شون�
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any
 
 from fxars.audit.audit import AuditAction, AuditLog
 from fxars.audit.outbox import EventType, Outbox
@@ -16,7 +17,7 @@ from fxars.config.settings import Settings
 from fxars.core.errors import PhaseViolationError, RiskRejectedError, ValidationError
 from fxars.core.ids import new_id, stable_id
 from fxars.domain.enums import OrderStatus, Phase, Side
-from fxars.domain.models import OrderIntent, RiskDecision, Scenario
+from fxars.domain.models import OrderIntent, RiskDecision
 from fxars.execution.state_machine import transition
 from fxars.risk.killswitch import KillSwitch
 from fxars.storage.repositories import OrderRepository, RiskRepository, ScenarioRepository

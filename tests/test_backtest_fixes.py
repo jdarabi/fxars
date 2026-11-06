@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from tests.helpers import make_env
@@ -12,9 +12,7 @@ class SwapTimeframeTests(unittest.TestCase):
     """FIX-06-SWAP: swap باید بر اساس دقیقه کندل باشد، نه bars/24."""
 
     def test_h1_swap(self):
-        from fxars.domain.models import Candle, Instrument, Position, Side
         from fxars.research.backtest import BacktestConfig, BacktestEngine
-        from fxars.domain.enums import Side as _Side
 
         env = make_env(bars=100)
         try:
@@ -48,15 +46,16 @@ class GapStopTests(unittest.TestCase):
 
     def test_gap_down_long(self):
         """LONG با Gap Down: خروج در open، نه stop."""
-        from fxars.research.backtest import _OpenTrade, BacktestEngine, BacktestConfig
-        from fxars.domain.models import Candle
-        from fxars.domain.enums import Direction
         from decimal import Decimal
+
+        from fxars.domain.enums import Direction
+        from fxars.domain.models import Candle
+        from fxars.research.backtest import BacktestConfig, BacktestEngine, _OpenTrade
         env = make_env(bars=100)
         try:
             config = BacktestConfig(slippage_pips=Decimal("0"), spread_pips=Decimal("0"))
             engine = BacktestEngine(env.instrument, "H1", config, env.settings.analysis)
-            now = datetime(2026, 3, 2, 10, tzinfo=timezone.utc)
+            now = datetime(2026, 3, 2, 10, tzinfo=UTC)
             position = _OpenTrade(
                 direction=Direction.LONG,
                 entry_index=0,

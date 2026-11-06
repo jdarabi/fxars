@@ -1,6 +1,7 @@
 # C:\FX\test_mt5.py
+from datetime import UTC, datetime
+
 import MetaTrader5 as mt5
-from datetime import datetime, timezone
 
 if not mt5.initialize():
     print('initialize FAIL:', mt5.last_error())
@@ -35,7 +36,7 @@ if rates is None:
     print('copy_rates FAIL:', mt5.last_error())
 else:
     for r in rates:
-        ts = datetime.fromtimestamp(int(r['time']), tz=timezone.utc)
+        ts = datetime.fromtimestamp(int(r['time']), tz=UTC)
         print(
             f"  {ts.isoformat()} "
             f"O={r['open']:.5f} H={r['high']:.5f} "

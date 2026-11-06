@@ -8,7 +8,6 @@ from fxars.core.errors import ConflictError
 from fxars.domain.enums import OrderStatus
 from fxars.domain.models import OrderIntent
 
-
 # ترتیب گذارهای مجاز:
 #   INTENT_CREATED -> RISK_APPROVED (پس از تأیید ریسک)
 #   RISK_APPROVED  -> SUBMITTED     (پس از enforce مجدد Kill Switch/TTL)

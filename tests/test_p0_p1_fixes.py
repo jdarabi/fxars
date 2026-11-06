@@ -21,6 +21,7 @@ from fxars.core.errors import (
 )
 from fxars.domain.enums import Role
 from fxars.domain.models import Candle, EconomicEvent
+
 from tests.helpers import ANALYST_PASSWORD, make_env
 
 

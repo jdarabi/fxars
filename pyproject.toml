@@ -69,6 +69,8 @@ select = [
     "UP",   # pyupgrade
 ]
 ignore = [
+    "UP042",  # StrEnum migration is deliberate
+    "E402",  # module-import-not-at-top for lazy imports
     "E501",  # line too long (handled by formatter)
     "B008",  # function call in default argument (unavoidable in dataclasses)
     "B904",  # raise without from inside except (used intentionally)

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from itertools import combinations
-from typing import Sequence
 
-from fxars.core.numerics import mean, normal_cdf, normal_ppf, safe_div, stdev
+from fxars.core.numerics import mean, normal_cdf, normal_ppf, stdev
 
 EULER_GAMMA = 0.5772156649015329
 
@@ -108,7 +108,7 @@ def probability_of_backtest_overfitting(
         return {"pbo": None, "splits": 0, "strategies": strategies, "reason": "INSUFFICIENT_DATA"}
 
     block_size = total // blocks
-    usable = block_size * blocks
+    block_size * blocks
     slices = [(index * block_size, (index + 1) * block_size) for index in range(blocks)]
     half = blocks // 2
     logits: list[float] = []

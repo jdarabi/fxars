@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any
 
 from fxars.core.errors import NotFoundError
 from fxars.core.ids import stable_id
@@ -15,7 +16,6 @@ from fxars.core.numerics import to_decimal
 from fxars.core.timeutil import format_ts, parse_ts, utcnow
 from fxars.domain.enums import (
     AnalysisStatus,
-    EventImportance,
     OrderStatus,
     RiskReasonCode,
     Role,

@@ -11,6 +11,7 @@ if str(_ROOT) not in sys.path:
 
 from fxars.api.metrics import MetricsRegistry
 from fxars.api.metrics_dashboard import render_metrics_dashboard
+
 from tests.test_http_integration import HttpServerFixture, _request
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path as _P
 
@@ -32,7 +32,7 @@ class ReconciliationTests(unittest.TestCase):
         self.orders = OrderRepository(self.db)
         self.audit = AuditLog(self.db)
         self.outbox = Outbox(self.db)
-        self.now = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+        self.now = datetime(2026, 1, 1, 12, tzinfo=UTC)
 
     def tearDown(self):
         self.db.close()

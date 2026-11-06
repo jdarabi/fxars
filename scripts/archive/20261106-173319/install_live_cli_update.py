@@ -1,8 +1,8 @@
 # C:\FX\install_live_cli_update.py
 """Update CLI `live` to support --config + --timeframes + --schedule."""
-from pathlib import Path
-import shutil
 import datetime
+import shutil
+from pathlib import Path
 
 ROOT = Path(r'C:\FX')
 stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -246,6 +246,7 @@ path.write_text(text, encoding='utf-8')
 print('OK: CLI updated')
 
 import py_compile
+
 try:
     py_compile.compile(str(path), doraise=True)
     print('syntax OK')

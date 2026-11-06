@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable
 
 from fxars.audit.audit import AuditAction, AuditLog
 from fxars.audit.outbox import EventType, Outbox
 from fxars.config.settings import Settings
 from fxars.core.context import current_correlation_id
-from fxars.domain.enums import ScenarioStatus
-from fxars.domain.models import Scenario, ScenarioTransition
 from fxars.decision.state_machine import ScenarioStateMachine
 from fxars.decision.trigger import TriggerEvaluator
+from fxars.domain.enums import ScenarioStatus
+from fxars.domain.models import Scenario, ScenarioTransition
 from fxars.storage.repositories import (
     CandleRepository,
     InstrumentRepository,

@@ -8,11 +8,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from fxars.core.timeutil import floor_to_timeframe, timeframe_delta
+from fxars.core.timeutil import timeframe_delta
 from fxars.domain.models import Candle
 
 logger = logging.getLogger('fxars.live.mt5')
@@ -106,7 +106,7 @@ class MT5Feed:
             raise MT5UnavailableError(
                 f'copy_rates_from_pos {symbol}/{timeframe} failed: ({code}) {msg}'
             )
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         tf_delta = timeframe_delta(timeframe.upper())
         candles: list[Candle] = []
         # B7: use symbol point (supports 3-digit JPY, 2-digit XAU)
@@ -116,7 +116,7 @@ class MT5Feed:
         point = Decimal(str(si['point']))
 
         for r in rates:
-            open_time = datetime.fromtimestamp(int(r['time']), tz=timezone.utc)
+            open_time = datetime.fromtimestamp(int(r['time']), tz=UTC)
             close_time = open_time + tf_delta
             is_closed = close_time <= now
             if not is_closed:
@@ -148,7 +148,7 @@ class MT5Feed:
     ) -> list[Candle]:
         """کندل‌های جدیدتر از `since` را بگیر."""
         all_candles = self.fetch_recent(symbol, timeframe, count=count)
-        since = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+        since = since.astimezone(UTC) if since.tzinfo else since.replace(tzinfo=UTC)
         return [c for c in all_candles if c.open_time > since]
 
     def shutdown(self) -> None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fxars.config.settings import Settings
 from fxars.data.synthetic import generate_candles, generate_reference_candles
@@ -11,7 +11,7 @@ from fxars.instruments.calendar import TradingCalendar, default_holidays
 from fxars.platform import Platform
 from fxars.storage.db import Database
 
-UTC = timezone.utc
+UTC = UTC
 ANALYST_PASSWORD = "AnalystPass123!"
 ADMIN_PASSWORD = "AdminPass12345!"
 AUDITOR_PASSWORD = "AuditorPass123!"

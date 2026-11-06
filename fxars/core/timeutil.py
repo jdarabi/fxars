@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Final
 
-UTC: Final = timezone.utc
+UTC: Final = UTC
 
 TIMEFRAME_MINUTES: Final[dict[str, int]] = {
     "M1": 1,

@@ -21,6 +21,7 @@ if str(_ROOT) not in sys.path:
 
 from fxars.api.server import create_server
 from fxars.domain.enums import Role
+
 from tests.helpers import ANALYST_PASSWORD, make_env
 
 

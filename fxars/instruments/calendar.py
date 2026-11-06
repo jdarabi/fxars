@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from fxars.core.timeutil import ensure_utc, floor_to_timeframe, timeframe_delta
+from fxars.core.timeutil import ensure_utc, floor_to_timeframe
 from fxars.domain.enums import SessionName, Timeframe
 
 

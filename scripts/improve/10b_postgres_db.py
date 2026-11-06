@@ -1,5 +1,5 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 p = Path("C:/FX/fxars/storage/postgres.py")
 text = p.read_text(encoding="utf-8")

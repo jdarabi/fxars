@@ -5,7 +5,7 @@ import argparse
 import csv
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -66,7 +66,7 @@ def download_from_mt5(
 
     candles: list[Candle] = []
     for r in rates:
-        open_time = datetime.fromtimestamp(int(r["time"]), tz=timezone.utc)
+        open_time = datetime.fromtimestamp(int(r["time"]), tz=UTC)
         candles.append(Candle(
             instrument_id=symbol,
             source_id="mt5",
@@ -80,7 +80,7 @@ def download_from_mt5(
             spread=Decimal(str(r["spread"])) * point if "spread" in r.dtype.names and r["spread"] > 0 else None,
             is_closed=True,
             available_at=open_time + _tf_delta(timeframe),
-            ingested_at=datetime.now(tz=timezone.utc),
+            ingested_at=datetime.now(tz=UTC),
             quality_status="VALID",
         ))
     candles.sort(key=lambda c: c.open_time)
@@ -168,7 +168,7 @@ def download_history(
                         try:
                             ingest = platform.ingestion.ingest(
                                 candles, instrument_id=symbol, source_id="mt5",
-                                now=datetime.now(tz=timezone.utc),
+                                now=datetime.now(tz=UTC),
                             )
                             print(f"    ingested {ingest.accepted}, quarantined {ingest.quarantined}", file=sys.stderr)
                         except Exception as exc:
@@ -217,8 +217,8 @@ def main(argv: list[str] | None = None) -> int:
 
     platform = None
     if args.ingest:
-        from fxars.platform import Platform
         from fxars.config.settings import Settings
+        from fxars.platform import Platform
         platform = Platform(Settings.load())
         print("Platform loaded (ingest mode)", file=sys.stderr)
 

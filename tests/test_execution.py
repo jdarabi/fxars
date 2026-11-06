@@ -9,6 +9,7 @@ from fxars.domain.enums import OrderStatus, Phase, Side
 from fxars.domain.models import OrderIntent
 from fxars.execution.paper_broker import PaperBroker
 from fxars.execution.state_machine import can_transition, transition
+
 from tests.helpers import make_env
 
 

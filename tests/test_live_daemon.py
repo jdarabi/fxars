@@ -4,8 +4,8 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path as _P
 from unittest.mock import MagicMock
@@ -119,8 +119,7 @@ class DaemonTests(unittest.TestCase):
         return daemon
 
     def test_run_once_with_signal(self):
-        from datetime import timedelta
-        now = datetime(2026, 11, 4, 12, tzinfo=timezone.utc)
+        now = datetime(2026, 11, 4, 12, tzinfo=UTC)
         feed = _FakeFeed([[_make_candle(now)]])
         notifier = _FakeNotifier()
         daemon = self._make_daemon(feed, notifier)
@@ -130,8 +129,7 @@ class DaemonTests(unittest.TestCase):
         self.assertEqual(notifier.sent[0][0], DecisionAction.LONG)
 
     def test_no_trade_does_not_notify(self):
-        from datetime import timedelta
-        now = datetime(2026, 11, 4, 12, tzinfo=timezone.utc)
+        now = datetime(2026, 11, 4, 12, tzinfo=UTC)
         feed = _FakeFeed([[_make_candle(now)]])
         notifier = _FakeNotifier()
         decision = _FakeDecision(
@@ -145,7 +143,7 @@ class DaemonTests(unittest.TestCase):
 
     def test_duplicate_direction_not_resent(self):
         from datetime import timedelta
-        now = datetime(2026, 11, 4, 12, tzinfo=timezone.utc)
+        now = datetime(2026, 11, 4, 12, tzinfo=UTC)
         feed = _FakeFeed([
             [_make_candle(now)],
             [_make_candle(now + timedelta(hours=1))],
@@ -167,7 +165,7 @@ class DaemonTests(unittest.TestCase):
         self.assertEqual(len(notifier.sent), 0)
 
     def test_max_cycles(self):
-        now = datetime(2026, 11, 4, 12, tzinfo=timezone.utc)
+        now = datetime(2026, 11, 4, 12, tzinfo=UTC)
         feed = _FakeFeed([[_make_candle(now)]])
         daemon = self._make_daemon(feed)
         daemon.run(max_cycles=2)

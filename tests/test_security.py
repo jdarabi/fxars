@@ -14,10 +14,10 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from fxars.core.errors import ValidationError
 from fxars.domain.enums import Permission, Role
 from fxars.identity.rbac import ROLE_PERMISSIONS, has_permission, permissions_for, require_permission
-from tests.helpers import ANALYST_PASSWORD, make_env
+
+from tests.helpers import ANALYST_PASSWORD
 from tests.test_http_integration import HttpServerFixture, _request
 
 
@@ -63,7 +63,7 @@ class RbacMatrixTests(unittest.TestCase):
 
 class RateLimitTests(unittest.TestCase):
     def test_rate_limiter_rejects_after_limit(self):
-        from fxars.api.server import RateLimiter
+        from fxars.api.rate_limit import MemoryRateLimiter as RateLimiter
         limiter = RateLimiter(limit=3, window_seconds=60)
         for _ in range(3):
             self.assertTrue(limiter.allow("k1"))
@@ -73,7 +73,8 @@ class RateLimitTests(unittest.TestCase):
 
     def test_rate_limiter_window_expires(self):
         import time
-        from fxars.api.server import RateLimiter
+
+        from fxars.api.rate_limit import MemoryRateLimiter as RateLimiter
         limiter = RateLimiter(limit=1, window_seconds=0.05)
         self.assertTrue(limiter.allow("k1"))
         self.assertFalse(limiter.allow("k1"))
@@ -168,7 +169,6 @@ class KillSwitchSecurityTests(unittest.TestCase):
         cls.fixture = HttpServerFixture()
         cls.fixture.start()
         # Create an admin with MFA for killswitch testing
-        from fxars.identity.totp import totp
         admin, _ = cls.fixture.env.platform.identity.create_user(
             "secadmin", Role.ADMIN, "SecAdminPass12345!", totp_enabled=True,
         )

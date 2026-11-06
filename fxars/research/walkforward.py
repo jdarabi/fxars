@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Sequence
+from typing import Any
 
 from fxars.config.settings import Settings
 from fxars.core.timeutil import format_ts
-from fxars.domain.enums import BacktestSegment
 from fxars.research.backtest import BacktestConfig, BacktestEngine
 from fxars.research.metrics import compute_metrics
 from fxars.research.protocol import walk_forward_windows
 from fxars.research.service import ResearchService
-
 
 DEFAULT_GRID: tuple[dict[str, Any], ...] = (
     {"stop_buffer_pips": 3},

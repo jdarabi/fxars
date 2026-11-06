@@ -7,7 +7,6 @@ import getpass
 import json
 import sys
 from dataclasses import replace
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -38,11 +37,11 @@ def _print_table(rows: list[dict[str, Any]], columns: list[tuple[str, str]]) -> 
     widths = []
     for key, title in columns:
         widths.append(max(len(title), max(len(str(row.get(key, ""))) for row in rows)))
-    header = " | ".join(title.ljust(width) for (_, title), width in zip(columns, widths))
+    header = " | ".join(title.ljust(width) for (_, title), width in zip(columns, widths, strict=False))
     print(header)
     print("-+-".join("-" * width for width in widths))
     for row in rows:
-        print(" | ".join(str(row.get(key, "")).ljust(width) for (key, _), width in zip(columns, widths)))
+        print(" | ".join(str(row.get(key, "")).ljust(width) for (key, _), width in zip(columns, widths, strict=False)))
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -465,7 +464,7 @@ def _copy_sqlite_to_postgres(settings, pg, *, tables=None, dry_run=False) -> dic
             placeholders = ", ".join(["%s"] * len(cols))
             col_list = ", ".join(cols)
             sql = f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) ON CONFLICT DO NOTHING"
-            payload = [tuple(row[c] if not isinstance(row[c], (dict, list)) else __import__("json").dumps(row[c]) for c in cols) for row in rows]
+            payload = [tuple(row[c] if not isinstance(row[c], dict | list) else __import__("json").dumps(row[c]) for c in cols) for row in rows]
             if dry_run:
                 result[table] = len(payload)
                 continue
@@ -505,7 +504,7 @@ def _copy_sqlite_to_postgres(settings, pg, *, tables=None, dry_run=False) -> dic
             placeholders = ", ".join(["%s"] * len(cols))
             col_list = ", ".join(cols)
             sql = f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) ON CONFLICT DO NOTHING"
-            payload = [tuple(row[c] if not isinstance(row[c], (dict, list)) else __import__("json").dumps(row[c]) for c in cols) for row in rows]
+            payload = [tuple(row[c] if not isinstance(row[c], dict | list) else __import__("json").dumps(row[c]) for c in cols) for row in rows]
             if dry_run:
                 result[table] = len(payload)
                 continue
@@ -707,10 +706,11 @@ def main(argv: list[str] | None = None) -> int:
 def cmd_live_v2(args: argparse.Namespace) -> None:
     """Real-time daemon with config + multi-TF."""
     import logging
+
+    from fxars.live.config import LiveConfig, ScheduleConfig
     from fxars.live.daemon import LiveDaemon, LiveDaemonConfig
     from fxars.live.mt5_feed import MT5Feed, MT5UnavailableError
     from fxars.live.notifier import TelegramConfig, TelegramNotifier
-    from fxars.live.config import LiveConfig, ScheduleConfig
 
     logging.basicConfig(
         level=logging.INFO,
@@ -811,4 +811,3 @@ def cmd_live_v2(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

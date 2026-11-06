@@ -5,9 +5,10 @@ from __future__ import annotations
 import sqlite3
 import unittest
 
-from fxars.audit.audit import AuditAction, AuditLog
+from fxars.audit.audit import AuditAction
 from fxars.audit.outbox import EventType, Outbox
 from fxars.core.context import correlation_scope
+
 from tests.helpers import make_env
 
 

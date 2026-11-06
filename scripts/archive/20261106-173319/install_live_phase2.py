@@ -1,8 +1,8 @@
 # C:\FX\install_live_phase2.py
 """Phase 2: Telegram notifier for FX-ARS Live."""
-from pathlib import Path
-import shutil
 import datetime
+import shutil
+from pathlib import Path
 
 ROOT = Path(r'C:\FX')
 stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')

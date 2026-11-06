@@ -1,8 +1,8 @@
 # C:\FX\fix_daemon_multitf.py
 """Force-rewrite daemon.py with multi-timeframe + schedule support."""
-from pathlib import Path
-import shutil
 import datetime
+import shutil
+from pathlib import Path
 
 ROOT = Path(r'C:\FX')
 stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -273,6 +273,7 @@ path.write_text(content, encoding='utf-8')
 print(f'OK: {path} rewritten ({len(content)} bytes)')
 
 import py_compile
+
 try:
     py_compile.compile(str(path), doraise=True)
     print('syntax OK')

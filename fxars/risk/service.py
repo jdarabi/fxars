@@ -1,17 +1,17 @@
 """سرویس ریسک: آماده‌سازی زمینه، اجرای دروازه، ثبت تصمیم و رویداد."""
 
 from __future__ import annotations
-from decimal import Decimal
 
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from decimal import Decimal
+from typing import Any
 
 from fxars.audit.audit import AuditAction, AuditLog
 from fxars.audit.outbox import EventType, Outbox
 from fxars.config.settings import Settings
 from fxars.core.numerics import to_decimal
-from fxars.core.timeutil import utcnow
 from fxars.domain.models import AccountSnapshot, RiskDecision
 from fxars.instruments.calendar import TradingCalendar
 from fxars.risk.account import parse_account_snapshot

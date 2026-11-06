@@ -5,15 +5,14 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Callable
 
 from fxars.audit.audit import AuditAction, AuditLog
 from fxars.config.settings import Settings
 from fxars.core.errors import AuthenticationError, RateLimitedError, ValidationError
 from fxars.core.ids import new_id
-from fxars.core.timeutil import utcnow
 from fxars.domain.enums import Role
 from fxars.domain.models import SessionRecord, User
 from fxars.identity.passwords import SecretBox, hash_password, verify_password

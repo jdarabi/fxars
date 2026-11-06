@@ -30,7 +30,7 @@ class PaperBroker:
     name: str = "paper"
 
     def _fraction(self, client_order_id: str, salt: str = "") -> float:
-        digest = hashlib.sha256(f"{client_order_id}|{salt}".encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(f"{client_order_id}|{salt}".encode()).hexdigest()
         return int(digest[:8], 16) / 0xFFFFFFFF
 
     def submit(

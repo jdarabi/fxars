@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections.abc import Iterable, Sequence
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, InvalidOperation, getcontext
-from typing import Iterable, Sequence
 
 # دقت بالاتر از نیاز بازار برای جلوگیری از خطای گردکردن زنجیره‌ای
 getcontext().prec = 34
@@ -104,7 +104,7 @@ def correlation(xs: Sequence[float], ys: Sequence[float]) -> float:
         return 0.0
     xs2, ys2 = xs[-n:], ys[-n:]
     mx, my = mean(xs2), mean(ys2)
-    cov = sum((x - mx) * (y - my) for x, y in zip(xs2, ys2)) / (n - 1)
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs2, ys2, strict=False)) / (n - 1)
     sx, sy = stdev(xs2), stdev(ys2)
     return clamp(safe_div(cov, sx * sy), -1.0, 1.0)
 

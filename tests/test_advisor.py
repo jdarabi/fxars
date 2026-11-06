@@ -4,7 +4,6 @@ from __future__ import annotations
 import sys
 import unittest
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path as _P
 

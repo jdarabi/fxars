@@ -13,6 +13,7 @@ from fxars.decision.state_machine import ScenarioStateMachine, can_transition
 from fxars.decision.trigger import TriggerEvaluator
 from fxars.domain.enums import DecisionAction, Direction, EvidenceFamily, ScenarioStatus
 from fxars.domain.models import Decision, Evidence, PriceZone
+
 from tests.helpers import make_env
 
 

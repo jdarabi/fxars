@@ -1,8 +1,8 @@
 # C:\FX\install_factory_fallback.py
 """FIX-10-PG: safe fallback in factory if Postgres unreachable."""
-from pathlib import Path
-import shutil
 import datetime
+import shutil
+from pathlib import Path
 
 ROOT = Path(r'C:\FX')
 stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')

@@ -13,6 +13,7 @@ import unittest
 
 from fxars.api.server import ApiApp, ApiRequest
 from fxars.domain.enums import Role
+
 from tests.helpers import make_env
 
 

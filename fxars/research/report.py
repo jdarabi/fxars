@@ -179,7 +179,7 @@ def _calibration_markdown_lines(metrics: dict) -> list[str]:
                 f"| {item.get('gap'):+.4f} |"
             )
     ece_value = cal.get("ece")
-    if isinstance(ece_value, (int, float)):
+    if isinstance(ece_value, int | float):
         verdict = "قابل قبول" if ece_value < 0.10 else "نیازمند بازبینی"
         lines.append(
             f"\n> معیار AC-09: ECE < 0.10 برای نمایش احتمال. "
@@ -223,7 +223,7 @@ def _calibration_html_card(metrics: dict) -> str:
         for item in bins
     )
     ece_value = cal.get("ece", 1.0)
-    verdict = "قابل قبول" if isinstance(ece_value, (int, float)) and ece_value < 0.10 else "نیازمند بازبینی"
+    verdict = "قابل قبول" if isinstance(ece_value, int | float) and ece_value < 0.10 else "نیازمند بازبینی"
     verdict_color = "#22c55e" if verdict == "قابل قبول" else "#f59e0b"
 
     return (
