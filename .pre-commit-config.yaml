@@ -25,7 +25,9 @@ repos:
             reports/.*|
             \.hypothesis/.*|
             \.fix-backups/.*|
-            \.cleanup-backups/.*
+            \.cleanup-backups/.*|
+            tests/.*|
+            scripts/launcher\.py
           )$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
