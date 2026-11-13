@@ -219,8 +219,6 @@
 
 ---
 
-# Changelog — FX-ARS
-
 ## [v1.4.11] — 2026-11-03
 
 ### Fixed (P0 — Security & Data Correctness)
