@@ -1,6 +1,6 @@
 #Requires -Version 7.0
 [CmdletBinding()]
-param([string]$ProjectRoot='C:\project\FX',[string]$TokenPrefix='8571434332',[switch]$DryRun)
+param([string]$ProjectRoot='C:\project\FX',[string]$TokenPrefix='REDACTED',[switch]$DryRun)
 $ErrorActionPreference='Stop'
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $backup=Join-Path $ProjectRoot ".fix-backups\remove-secrets-$stamp"

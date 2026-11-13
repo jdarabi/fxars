@@ -44,7 +44,9 @@
   "data_quality": {
     "max_bar_age_bars": 1.5,
     "freshness_grace_seconds": 300,
-    "source_divergence_pips": "2.0"
+    "source_divergence_pips": "2.0",
+    "max_spread_pips": "20",
+    "max_price_jump_pips": "250"
   },
   "backtest": {
     "initial_equity": "10000",

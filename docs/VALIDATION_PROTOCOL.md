@@ -47,10 +47,50 @@ Net Profit، Return%، Profit Factor (تعریف‌نشده اگر Gross Loss=0)
 - نتیجه OOS مثبت تضمین آینده نیست؛ Forward Test و پایش زنده لازم است.
 - معیارهای پذیرش بک‌تست پیش از مشاهده Locked Test ثبت می‌شوند.
 
-## ۷. اجرای نمونه
+## ۷. دروازه پذیرش (سند تکمیلی ۱.۱ §۹-۲)
+
+هیچ نتیجه‌ای «قابل انتشار» نیست مگر `evaluate_acceptance` را عبور کند. آستانه‌ها در `AcceptancePolicy` (بخش `decision.acceptance`) نسخه‌دارند.
+
+| کنترل | قاعده |
+|---|---|
+| OOS_SAMPLE | نتیجه از TRAIN نباشد و ≥ ۲۰۰ معامله OOS داشته باشد |
+| PROFIT_FACTOR | ≥ ۱٫۲ (تعریف‌نشده = رد) |
+| MAX_DRAWDOWN | ≤ ۱۵٪ |
+| SHARPE_POSITIVE | شارپ > ۰ |
+| CALMAR | در صورت تعیین حداقل مثبت، ≥ آن |
+| CALIBRATION_ECE | در صورت وجود، ≤ ۰٫۰۵ |
+| TRAIN_TEST_GAP | افت PF آموزش→آزمون ≤ ۵۰٪ |
+| COSTS_MODELED | کل هزینه‌ها > ۰ و تفکیک‌شده |
+
+### ضدالگوها
+
+| کد | شدت | معنا |
+|---|---|---|
+| TINY_SAMPLE | HIGH | نمونه کمتر از حداقل آماری |
+| OVERFIT_GAP | HIGH | افت شدید عملکرد از آموزش به آزمون |
+| IGNORED_COSTS | HIGH | هزینه صفر/مدل‌نشده |
+| NO_LOCKED_TEST | MEDIUM | Locked Test استفاده نشده |
+| NO_WALKFORWARD | MEDIUM | Walk-forward انجام نشده |
+| SINGLE_REGIME | MEDIUM | همه معاملات در یک رژیم |
+
+### اجرا
+
+```powershell
+python -m fxars research-gate <run_id>
+python -m fxars research-gate <run_id> --strict   # خروج ۲ در صورت رد
+```
+
+معادل API: `GET /api/v1/governance/acceptance/{run_id}`.
+
+### تعریف برنده‌شدن
+
+«برنده» یعنی **عبور از این دروازه روی OOS**؛ نه بهترین بازده در نمونه. نتیجه‌ای که فقط با تغییر پارامتر پس از دیدن Locked Test بهتر شده باشد، رد می‌شود.
+
+## ۸. اجرای نمونه
 
 ```powershell
 python -m fxars backtest --instrument EURUSD --timeframe H1 --segment TRAIN --report
 python -m fxars walkforward --instrument EURUSD --timeframe H1
 python -m fxars pbo --instrument EURUSD --timeframe H1
+python -m fxars research-gate <run_id> --strict
 ```

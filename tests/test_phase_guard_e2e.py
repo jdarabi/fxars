@@ -1,4 +1,4 @@
-"""End-to-end Phase Guard tests (P6-2)."""
+﻿"""End-to-end Phase Guard tests (P6-2)."""
 from __future__ import annotations
 
 import sys

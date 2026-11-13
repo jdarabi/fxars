@@ -141,27 +141,51 @@ class HeaderInjectionTests(unittest.TestCase):
 
 
 class CorsPreflightTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.fixture = HttpServerFixture()
-        cls.fixture.start()
+    """FIX-16b-CORS-ISOLATION: هر تست fixture مستقل دارد (setUp/tearDown)."""
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.fixture.stop()
+    def setUp(self):
+        self.fixture = HttpServerFixture()
+        self.fixture.start()
 
-    def test_options_returns_cors_headers(self):
+    def tearDown(self):
+        self.fixture.stop()
+
+    def _options(self, url):
         import urllib.request
-        req = urllib.request.Request(
-            self.fixture.base + "/api/v1/health",
-            method="OPTIONS",
-        )
+        req = urllib.request.Request(url, method="OPTIONS")
         with urllib.request.urlopen(req, timeout=5) as resp:
-            self.assertEqual(resp.status, 204)
             headers = {k.lower(): v for k, v in resp.headers.items()}
-            self.assertIn("access-control-allow-origin", headers)
-            self.assertIn("GET", headers["access-control-allow-methods"])
+            return resp.status, headers
 
+    def test_options_no_acao_when_cors_empty(self):
+        """پیش‌فرض: cors_allow_origin خالی → ACAO نباید ارسال شود (امن)."""
+        status, headers = self._options(self.fixture.base + "/api/v1/health")
+        self.assertEqual(status, 204)
+        self.assertNotIn(
+            "access-control-allow-origin", headers,
+            "امنیت: ACAO نباید با cors_allow_origin خالی ارسال شود",
+        )
+        self.assertIn("access-control-allow-headers", headers)
+        self.assertIn("access-control-allow-methods", headers)
+        self.assertIn("GET", headers["access-control-allow-methods"])
+
+    def test_options_acao_when_cors_configured(self):
+        """با cors_allow_origin معتبر → ACAO ارسال شود."""
+        from fxars.api.server import ApiApp
+        new_settings = self.fixture.env.settings.__class__.from_dict({
+            "phase": "READ_ONLY",
+            "db_path": ":memory:",
+            "environment": "dev",
+            "api": {"cors_allow_origin": "https://example.com"},
+        })
+        self.fixture.env.platform.settings = new_settings
+        self.fixture.server.app = ApiApp(self.fixture.env.platform)
+        status, headers = self._options(self.fixture.base + "/api/v1/health")
+        self.assertEqual(status, 204)
+        self.assertEqual(
+            headers.get("access-control-allow-origin"),
+            "https://example.com",
+        )
 
 class KillSwitchSecurityTests(unittest.TestCase):
     @classmethod
@@ -203,6 +227,32 @@ class KillSwitchSecurityTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "VALIDATION_ERROR")
 
+    def test_killswitch_deactivate_round_trip_updates_meta(self):
+        token = self._admin_token()
+        status, payload, _ = _request(
+            "POST",
+            self.fixture.base + "/api/v1/killswitch",
+            body={"active": True, "reason": "round trip on"},
+            token=token,
+            idempotency_key="ks-rt-on",
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertTrue(payload["killswitch"]["active"])
+
+        status, payload, _ = _request(
+            "POST",
+            self.fixture.base + "/api/v1/killswitch",
+            body={"active": False, "reason": "round trip off"},
+            token=token,
+            idempotency_key="ks-rt-off",
+        )
+        self.assertEqual(status, 200, payload)
+        self.assertFalse(payload["killswitch"]["active"])
+
+        status, meta, _ = _request("GET", self.fixture.base + "/api/v1/meta", token=token)
+        self.assertEqual(status, 200, meta)
+        self.assertFalse(meta["killswitch"]["active"])
+
     def test_killswitch_with_reason_succeeds(self):
         token = self._admin_token()
         status, payload, _ = _request(
@@ -226,3 +276,7 @@ class KillSwitchSecurityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# FIX-16-CORS-TEST
+
+# FIX-16b-CORS-ISOLATION

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from fxars.analysis.engine import AnalysisEngine, AnalysisOutcome
 from fxars.audit.audit import AuditAction, AuditLog
@@ -16,9 +17,13 @@ from fxars.core.ids import stable_id
 from fxars.core.logging_setup import get_logger
 from fxars.core.timeutil import format_ts, timeframe_delta
 from fxars.data.snapshot import snapshot_id
+from fxars.data.trust import compute_data_trust
 from fxars.decision.aggregation import aggregate_evidence
+from fxars.decision.evidence_graph import build_evidence_graph
 from fxars.decision.scenario import ScenarioBuilder
+from fxars.decision.score import composite_score
 from fxars.decision.state_machine import ScenarioStateMachine
+from fxars.decision.uncertainty import compute_uncertainty
 from fxars.domain.enums import AnalysisStatus, DecisionAction, Direction, QualityStatus, ScenarioStatus, Timeframe
 from fxars.domain.models import (
     AnalysisRun,
@@ -68,6 +73,8 @@ class AnalysisService:
         state_machine: ScenarioStateMachine,
         calendar: TradingCalendar,
         quality_runs: DataQualityRepository,
+        quota=None,
+        provenance=None,
     ) -> None:
         self.settings = settings
         self.clock = clock
@@ -83,6 +90,8 @@ class AnalysisService:
         self.state_machine = state_machine
         self.calendar = calendar
         self.quality_runs = quality_runs
+        self.quota = quota
+        self.provenance = provenance
 
     def run(
         self,
@@ -91,6 +100,7 @@ class AnalysisService:
         *,
         as_of: datetime | None = None,
         actor: str = "system",
+        tenant_id: str = "default",
     ) -> AnalysisResult:
         instrument = self.instruments.get(instrument_id)
         tf = Timeframe.parse(timeframe)
@@ -113,6 +123,7 @@ class AnalysisService:
             latest
             and self.calendar.is_stale(
                 latest.available_at, moment, tf.value,
+                instrument_id=instrument_id,
                 grace_seconds=self.settings.data_quality.freshness_grace_seconds,
                 max_age_bars=self.settings.data_quality.max_bar_age_bars,
             )
@@ -121,8 +132,11 @@ class AnalysisService:
         run_basis = decision_time if (latest and not stale) else moment
         run_id = stable_id(
             "ar", instrument_id, tf.value, snapshot, self.settings.config_hash(),
-            self.settings.code_version, run_basis, length=24,
+            self.settings.code_version, run_basis,
+            "" if tenant_id == "default" else tenant_id, length=24,
         )
+        if self.quota is not None and self.analyses.find_run(run_id) is None:
+            self.quota.check_analysis(tenant_id)
         data_quality = {
             "bars": len(candles),
             "stale": stale,
@@ -133,6 +147,20 @@ class AnalysisService:
             "requested_as_of": format_ts(moment),
             "decision_time": format_ts(decision_time),
         }
+        expected_times = None
+        if candles:
+            expected_times = self.calendar.expected_bar_times(
+                candles[0].open_time, candles[-1].open_time, tf.value,
+                instrument_id=instrument_id,
+            )
+        trust = compute_data_trust(
+            candles,
+            as_of=decision_time,
+            timeframe=tf.value,
+            expected_bar_times=expected_times,
+            policy=self.settings.decision.trust,
+        )
+        data_quality["data_trust"] = trust.to_dict()
 
         if latest is None or len(candles) < self.settings.analysis.min_bars:
             decision = Decision(
@@ -153,7 +181,7 @@ class AnalysisService:
                 snapshot=snapshot, data_quality=data_quality, decision=decision, evidences=[],
                 outcome=None, scenario=None, scenario_reason="NO_ANALYSIS",
                 status=AnalysisStatus.NO_TRADE, started_at=started_at, actor=actor,
-                correlation=correlation, stale=stale,
+                correlation=correlation, stale=stale, tenant_id=tenant_id,
             )
 
         if stale:
@@ -178,7 +206,7 @@ class AnalysisService:
                 snapshot=snapshot, data_quality=data_quality, decision=decision, evidences=[],
                 outcome=None, scenario=None, scenario_reason="DATA_STALE",
                 status=AnalysisStatus.STALE, started_at=started_at, actor=actor,
-                correlation=correlation, stale=True,
+                correlation=correlation, stale=True, tenant_id=tenant_id,
             )
 
         # FIX-P0-DQ-FAIL: اگر آخرین DQ verdict=FAIL باشد، تحلیل مجاز نیست.
@@ -220,7 +248,8 @@ class AnalysisService:
             _snap = snapshot_id(candles, instrument_id, tf.value) if candles else ""
             _run_id = stable_id(
                 "ar", instrument_id, tf.value, _snap, self.settings.config_hash(),
-                self.settings.code_version, moment, length=24,
+                self.settings.code_version, moment,
+                "" if tenant_id == "default" else tenant_id, length=24,
             )
             _dq_info = {
                 "bars": len(candles), "stale": False,
@@ -237,7 +266,35 @@ class AnalysisService:
                 snapshot=_snap, data_quality=_dq_info, decision=decision, evidences=[],
                 outcome=None, scenario=None, scenario_reason="DATA_QUALITY_FAIL",
                 status=AnalysisStatus.NO_TRADE, started_at=started_at, actor=actor,
-                correlation=correlation, stale=False,
+                correlation=correlation, stale=False, tenant_id=tenant_id,
+            )
+
+        # SUPPLEMENT-1.1 §4-2: DTS < DTS_min ⇒ تحلیل مجاز نیست (NO_TRADE).
+        if trust.score < self.settings.decision.trust.min_score:
+            decision = Decision(
+                action=DecisionAction.NO_TRADE,
+                direction=Direction.NEUTRAL,
+                score=0.0,
+                confidence_raw=0.0,
+                family_scores={},
+                conflicts=(),
+                coverage=0.0,
+                stability=0.0,
+                reasons=(
+                    f"اعتماد داده ({trust.score:.0%}) کمتر از حد مصوب "
+                    f"({self.settings.decision.trust.min_score:.0%}) است؛ طبق اصل Fail-Safe معامله‌ای پیشنهاد نمی‌شود.",
+                    *trust.reasons,
+                ),
+                evidence_ids=(),
+                no_trade_reason="DATA_UNTRUSTED",
+            )
+            return self._persist(
+                instrument_id=instrument_id, timeframe=tf.value, moment=decision_time, run_id=run_id,
+                snapshot=snapshot, data_quality=data_quality, decision=decision, evidences=[],
+                outcome=None, scenario=None, scenario_reason="DATA_UNTRUSTED",
+                status=AnalysisStatus.NO_TRADE, started_at=started_at, actor=actor,
+                correlation=correlation, stale=stale, tenant_id=tenant_id,
+                analysis_meta={"data_trust": trust.to_dict()},
             )
 
         lookback = self.settings.analysis.fundamental_lookback_hours
@@ -278,16 +335,70 @@ class AnalysisService:
                 snapshot=snapshot, data_quality=data_quality, decision=decision, evidences=[],
                 outcome=outcome, scenario=None, scenario_reason="INSUFFICIENT_DATA",
                 status=AnalysisStatus.NO_TRADE, started_at=started_at, actor=actor,
-                correlation=correlation, stale=False,
+                correlation=correlation, stale=False, tenant_id=tenant_id,
             )
 
         decision = aggregate_evidence(outcome.evidences, self.settings.analysis, as_of=decision_time, timeframe=tf.value)
+        last_candle = outcome.candles[-1] if outcome.candles else None
+        spread_pips = Decimal("0")
+        if last_candle is not None and last_candle.spread is not None:
+            spread_pips = last_candle.spread / instrument.pip_size
+        spread_ok = spread_pips <= self.settings.risk.max_spread_pips
+        uncertainty = compute_uncertainty(
+            data_trust=trust.score,
+            model_status="none",
+            regime_stability=decision.stability,
+            regime_uncertain=outcome.summary.get("trend") in (None, "RANGE", "NEUTRAL"),
+            conflict_families=len(decision.conflicts),
+            max_conflict_families=max(1, self.settings.analysis.max_conflict_families),
+            spread_ok=spread_ok,
+            execution_cost_ratio=(
+                float(spread_pips / max(self.settings.risk.max_spread_pips, Decimal("1")))
+                if spread_pips > 0
+                else 0.0
+            ),
+            policy=self.settings.decision.uncertainty,
+        )
+        data_quality["uncertainty"] = uncertainty.to_dict()
+        evidence_graph = build_evidence_graph(
+            outcome.evidences,
+            decision=decision,
+            analysis_run_id=run_id,
+            rules_version=self.settings.rules_version,
+            model_versions={"rules": self.settings.rules_version, "ml": "none"},
+            policy=self.settings.decision.evidence,
+            generated_at=decision_time,
+        )
+        score = composite_score(
+            outcome.evidences, decision=decision, policy=self.settings.decision.evidence,
+        )
+        analysis_meta = {
+            "data_trust": trust.to_dict(),
+            "uncertainty": uncertainty.to_dict(),
+            "evidence_graph": evidence_graph.to_dict(),
+            "graph_id": evidence_graph.graph_id,
+            "composite_score": score.to_dict(),
+        }
+        if uncertainty.requires_no_trade and decision.action is not DecisionAction.NO_TRADE:
+            decision = replace(
+                decision,
+                action=DecisionAction.NO_TRADE,
+                direction=Direction.NEUTRAL,
+                no_trade_reason="UNCERTAINTY_TOO_HIGH",
+                reasons=decision.reasons + (
+                    f"عدم‌قطعیت کل {uncertainty.total:.0%} از آستانه مجاز بیشتر است.",
+                    *uncertainty.reasons,
+                ),
+            )
         scenario: Scenario | None = None
         scenario_reason = "NO_TRADE"
         transition: ScenarioTransition | None = None
 
         if decision.action is not DecisionAction.NO_TRADE:
-            built = self.builder.build(outcome, decision, run_id=run_id, rules_version=self.settings.rules_version)
+            built = self.builder.build(
+                outcome, decision, run_id=run_id, rules_version=self.settings.rules_version,
+                tenant_id=tenant_id,
+            )
             scenario_reason = built.reason
             if built.scenario is None:
                 decision = replace(
@@ -321,7 +432,7 @@ class AnalysisService:
             snapshot=snapshot, data_quality=data_quality, decision=decision, evidences=stored,
             outcome=outcome, scenario=scenario, scenario_reason=scenario_reason,
             status=status, started_at=started_at, actor=actor, correlation=correlation,
-            stale=False, transition=transition,
+            stale=False, transition=transition, tenant_id=tenant_id, analysis_meta=analysis_meta,
         )
 
     def _references(self, instrument_id: str, timeframe: str, moment: datetime) -> dict[str, list]:
@@ -358,6 +469,8 @@ class AnalysisService:
         correlation: str,
         stale: bool,
         transition: ScenarioTransition | None = None,
+        tenant_id: str = "default",
+        analysis_meta: dict | None = None,
     ) -> AnalysisResult:
         finished = self.clock()
         # ترتیب/شناسه شواهد بخشی از هویت نتیجه نیست؛ هش بر تصمیم + امضای معنایی شواهد است.
@@ -428,6 +541,8 @@ class AnalysisService:
         decision_payload = decision.to_dict()
         decision_payload["scenario_id"] = scenario.scenario_id if scenario else None
         decision_payload["scenario_reason"] = scenario_reason
+        if analysis_meta:
+            decision_payload["analysis_meta"] = analysis_meta
 
         run = AnalysisRun(
             run_id=run_id,
@@ -447,6 +562,7 @@ class AnalysisService:
             decision=decision_payload,
             data_quality=data_quality,
             error=None,
+            tenant_id=tenant_id,
         )
 
         with self.analyses.db.transaction():
@@ -457,6 +573,8 @@ class AnalysisService:
                 self.scenarios.save(scenario)
             if transition is not None:
                 self.scenarios.add_transition(transition)
+            if self.provenance is not None:
+                self.provenance.record_run(run, actor=actor)
             self.audit.append(
                 AuditAction.ANALYSIS_COMPLETED if status is AnalysisStatus.COMPLETED else AuditAction.ANALYSIS_NO_TRADE,
                 "analysis_run",
@@ -465,6 +583,7 @@ class AnalysisService:
                 correlation_id=correlation,
                 payload={
                     "instrument_id": instrument_id,
+                    "tenant_id": tenant_id,
                     "timeframe": timeframe,
                     "status": status.value,
                     "decision": decision.action.value,
@@ -481,6 +600,7 @@ class AnalysisService:
                 EventType.ANALYSIS_COMPLETED,
                 {
                     "run_id": run_id,
+                    "tenant_id": tenant_id,
                     "instrument_id": instrument_id,
                     "timeframe": timeframe,
                     "status": status.value,
@@ -495,6 +615,7 @@ class AnalysisService:
                     EventType.SCENARIO_CREATED,
                     {
                         "scenario_id": scenario.scenario_id,
+                        "tenant_id": tenant_id,
                         "instrument_id": scenario.instrument_id,
                         "direction": scenario.direction.value,
                         "status": scenario.status.value,

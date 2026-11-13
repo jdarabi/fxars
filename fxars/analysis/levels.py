@@ -88,7 +88,9 @@ class LevelsModule:
                 candidates.append(Level(min(item.low for item in window), "SWING_LOW", 1, 0.0))
 
             # سطوح سشن‌های تکمیل‌شده امروز
-            sessions = context.calendar.sessions_at(candle.open_time)
+            sessions = context.calendar.sessions_at(
+                candle.open_time, instrument_id=context.instrument.instrument_id,
+            )
             for session in sessions:
                 high, low = sessions_today.get(session, (candle.high, candle.low))
                 sessions_today[session] = (max(high, candle.high), min(low, candle.low))

@@ -180,9 +180,19 @@ def _calibration_markdown_lines(metrics: dict) -> list[str]:
             )
     ece_value = cal.get("ece")
     if isinstance(ece_value, int | float):
-        verdict = "قابل قبول" if ece_value < 0.10 else "نیازمند بازبینی"
+        samples = cal.get("n")
+        min_samples = 100
+        if isinstance(samples, int) and samples < min_samples:
+            verdict = (
+                f"نمونه کافی نیست (n={samples} < {min_samples})؛ "
+                "ECE به‌تنهایی قابل استناد نیست و احتمال نمایش داده نمی‌شود"
+            )
+        elif ece_value < 0.10:
+            verdict = "قابل قبول"
+        else:
+            verdict = "نیازمند بازبینی؛ احتمال نمایش داده نمی‌شود"
         lines.append(
-            f"\n> معیار AC-09: ECE < 0.10 برای نمایش احتمال. "
+            f"\n> معیار AC-09: ECE < 0.10 و نمونهٔ کافی برای نمایش احتمال. "
             f"مقدار فعلی: {verdict}."
         )
     return lines

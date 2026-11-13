@@ -30,6 +30,7 @@ from fxars.domain.models import (
     BacktestRun,
     BrokerOrder,
     Candle,
+    ClosedTrade,
     DataQualityRun,
     DataSource,
     EconomicEvent,
@@ -37,6 +38,7 @@ from fxars.domain.models import (
     Fill,
     Instrument,
     ModelRecord,
+    OrderApproval,
     OrderIntent,
     Position,
     RiskCheck,
@@ -44,6 +46,7 @@ from fxars.domain.models import (
     Scenario,
     ScenarioTransition,
     SessionRecord,
+    Tenant,
     User,
 )
 from fxars.storage.db import Database
@@ -222,9 +225,12 @@ class CandleRepository:
         return stats
 
     def quarantine(self, candle: Candle, reasons: Sequence[str]) -> None:
+        # هر کندل معیوب یک ردیف دارد؛ ورود مکرر همان کندل ردیف تکراری نمی‌سازد.
         self.db.execute(
             "INSERT INTO candle_quarantine (instrument_id, source_id, timeframe, open_time, reasons, payload, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (instrument_id, source_id, timeframe, open_time) DO UPDATE SET "
+            "reasons = excluded.reasons, payload = excluded.payload",
             (candle.instrument_id, candle.source_id, candle.timeframe, format_ts(candle.open_time),
              json.dumps(list(reasons), ensure_ascii=False), _dump(candle.to_dict()), format_ts(utcnow())),
         )
@@ -271,6 +277,16 @@ class CandleRepository:
             params.append(int(limit))
         return [Candle.from_dict(_row_payload(row)) for row in self.db.query(sql, params)]
 
+    def recent_until(self, instrument_id: str, timeframe: str | Timeframe, *,
+                     end: datetime, limit: int = 200) -> list[Candle]:
+        """آخرین کندل‌های بسته‌شده تا یک زمان (صعودی) برای محاسبه رژیم در لحظه ورود."""
+        tf = Timeframe.parse(timeframe).value
+        rows = self.db.query(
+            self._base_query() + " AND c.is_closed=1 AND c.open_time<=? ORDER BY c.open_time DESC LIMIT ?",
+            (instrument_id, tf, format_ts(end), int(limit)),
+        )
+        return [Candle.from_dict(_row_payload(row)) for row in reversed(rows)]
+
     def latest(self, instrument_id: str, timeframe: str | Timeframe, *, source_id: str | None = None) -> Candle | None:
         candles = self.range(instrument_id, timeframe, source_id=source_id, closed_only=True)
         return candles[-1] if candles else None
@@ -286,6 +302,28 @@ class CandleRepository:
 
     def latest_available(self, instrument_id: str, timeframe: str | Timeframe, source_id: str | None = None) -> Candle | None:
         return self.latest(instrument_id, timeframe, source_id=source_id)
+
+    def latest_closed(
+        self,
+        instrument_id: str,
+        timeframe: str | Timeframe,
+        *,
+        source_id: str | None = None,
+        as_of: datetime | None = None,
+    ) -> Candle | None:
+        """آخرین کندل بسته (بدون بارگذاری کل تاریخچه) برای قیمت جاری داشبورد."""
+        tf = Timeframe.parse(timeframe).value
+        sql = self._base_query() + " AND c.is_closed=1"
+        params: list[Any] = [instrument_id, tf]
+        if source_id:
+            sql += " AND c.source_id=?"
+            params.append(source_id)
+        if as_of is not None:
+            sql += " AND c.available_at<=?"
+            params.append(format_ts(as_of))
+        sql += " ORDER BY c.open_time DESC LIMIT 1"
+        row = self.db.query_one(sql, params)
+        return Candle.from_dict(_row_payload(row)) if row else None
 
     def revisions(self, instrument_id: str, timeframe: str | Timeframe) -> int:
         return int(self.db.scalar("SELECT COUNT(*) FROM candle_revision_log WHERE instrument_id=? AND timeframe=?",
@@ -347,12 +385,12 @@ class AnalysisRepository:
     def save_run(self, run: AnalysisRun) -> None:
         self.db.execute(
             "INSERT INTO analysis_runs (run_id, instrument_id, timeframe, as_of, data_snapshot_id, config_hash, code_version, "
-            "model_version, status, correlation_id, started_at, finished_at, result_hash, evidence_count, decision, data_quality, error) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(run_id) DO NOTHING",
+            "model_version, status, correlation_id, started_at, finished_at, result_hash, evidence_count, decision, data_quality, error, tenant_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(run_id) DO NOTHING",
             (run.run_id, run.instrument_id, run.timeframe, format_ts(run.as_of), run.data_snapshot_id, run.config_hash,
              run.code_version, run.model_version, run.status.value, run.correlation_id, format_ts(run.started_at),
              format_ts(run.finished_at) if run.finished_at else None, run.result_hash, run.evidence_count,
-             _dump(run.decision), _dump(run.data_quality), run.error),
+             _dump(run.decision), _dump(run.data_quality), run.error, run.tenant_id),
         )
 
     def get_run(self, run_id: str) -> AnalysisRun:
@@ -361,9 +399,24 @@ class AnalysisRepository:
             raise NotFoundError(f"اجرای تحلیل {run_id} یافت نشد.", details={"run_id": run_id})
         return self._decode(row)
 
+    def get_run_for_tenant(self, run_id: str, tenant_id: str) -> AnalysisRun:
+        run = self.get_run(run_id)
+        if run.tenant_id != tenant_id:
+            raise NotFoundError(f"اجرای تحلیل {run_id} یافت نشد.", details={"run_id": run_id})
+        return run
+
     def find_run(self, run_id: str) -> AnalysisRun | None:
         row = self.db.query_one("SELECT * FROM analysis_runs WHERE run_id=?", (run_id,))
         return self._decode(row) if row else None
+
+    def count_since(self, tenant_id: str, since: datetime) -> int:
+        return int(self.db.scalar(
+            "SELECT COUNT(*) FROM analysis_runs WHERE tenant_id=? AND started_at>=?",
+            (tenant_id, format_ts(since)),
+        ) or 0)
+
+    def count_by_tenant(self, tenant_id: str) -> int:
+        return int(self.db.scalar("SELECT COUNT(*) FROM analysis_runs WHERE tenant_id=?", (tenant_id,)) or 0)
 
     @staticmethod
     def _decode(row: Any) -> AnalysisRun:
@@ -385,14 +438,22 @@ class AnalysisRepository:
             decision=_load(row["decision"]),
             data_quality=_load(row["data_quality"]),
             error=row["error"],
+            tenant_id=row["tenant_id"] if "tenant_id" in row.keys() else "default",
         )
 
-    def list_runs(self, *, instrument_id: str | None = None, limit: int = 50, offset: int = 0) -> list[AnalysisRun]:
+    def list_runs(self, *, instrument_id: str | None = None, limit: int = 50, offset: int = 0,
+                  tenant_id: str | None = None) -> list[AnalysisRun]:
         sql = "SELECT run_id FROM analysis_runs"
         params: list[Any] = []
+        conditions: list[str] = []
         if instrument_id:
-            sql += " WHERE instrument_id=?"
+            conditions.append("instrument_id=?")
             params.append(instrument_id)
+        if tenant_id is not None:
+            conditions.append("tenant_id=?")
+            params.append(tenant_id)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
         sql += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         return [self.get_run(row["run_id"]) for row in self.db.query(sql, params)]
@@ -423,12 +484,13 @@ class ScenarioRepository:
     def save(self, scenario: Scenario) -> None:
         self.db.execute(
             "INSERT INTO scenarios (scenario_id, instrument_id, timeframe, direction, status, expiry_at, created_at, updated_at, "
-            "risk_decision_id, analysis_run_id, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "risk_decision_id, analysis_run_id, payload, tenant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(scenario_id) DO UPDATE SET status=excluded.status, updated_at=excluded.updated_at, "
-            "risk_decision_id=excluded.risk_decision_id, payload=excluded.payload",
+            "risk_decision_id=excluded.risk_decision_id, payload=excluded.payload, tenant_id=excluded.tenant_id",
             (scenario.scenario_id, scenario.instrument_id, scenario.timeframe, scenario.direction.value,
              scenario.status.value, format_ts(scenario.expiry_at), format_ts(scenario.created_at),
-             format_ts(scenario.updated_at), scenario.risk_decision_id, scenario.analysis_run_id, _dump(scenario)),
+             format_ts(scenario.updated_at), scenario.risk_decision_id, scenario.analysis_run_id, _dump(scenario),
+             scenario.tenant_id),
         )
 
     def get(self, scenario_id: str) -> Scenario:
@@ -437,8 +499,14 @@ class ScenarioRepository:
             raise NotFoundError(f"سناریو {scenario_id} یافت نشد.", details={"scenario_id": scenario_id})
         return Scenario.from_dict(_row_payload(row))
 
+    def get_for_tenant(self, scenario_id: str, tenant_id: str) -> Scenario:
+        scenario = self.get(scenario_id)
+        if scenario.tenant_id != tenant_id:
+            raise NotFoundError(f"سناریو {scenario_id} یافت نشد.", details={"scenario_id": scenario_id})
+        return scenario
+
     def list(self, *, status: ScenarioStatus | None = None, instrument_id: str | None = None,
-             limit: int = 100, offset: int = 0) -> list[Scenario]:
+             limit: int = 100, offset: int = 0, tenant_id: str | None = None) -> list[Scenario]:
         sql = "SELECT payload FROM scenarios WHERE 1=1"
         params: list[Any] = []
         if status:
@@ -447,20 +515,41 @@ class ScenarioRepository:
         if instrument_id:
             sql += " AND instrument_id=?"
             params.append(instrument_id)
+        if tenant_id is not None:
+            sql += " AND tenant_id=?"
+            params.append(tenant_id)
         sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         return [Scenario.from_dict(_row_payload(row)) for row in self.db.query(sql, params)]
 
-    def live(self) -> list[Scenario]:
-        rows = self.db.query("SELECT payload FROM scenarios WHERE status IN ('DRAFT','WATCH','ARMED','TRIGGERED') ORDER BY created_at")
+    def live(self, *, tenant_id: str | None = None) -> list[Scenario]:
+        sql = "SELECT payload FROM scenarios WHERE status IN ('DRAFT','WATCH','ARMED','TRIGGERED')"
+        params: list[Any] = []
+        if tenant_id is not None:
+            sql += " AND tenant_id=?"
+            params.append(tenant_id)
+        sql += " ORDER BY created_at"
+        rows = self.db.query(sql, params)
         return [Scenario.from_dict(_row_payload(row)) for row in rows]
 
-    def find_by_run(self, run_id: str) -> Scenario | None:
-        row = self.db.query_one("SELECT payload FROM scenarios WHERE analysis_run_id=? ORDER BY created_at DESC LIMIT 1", (run_id,))
+    def find_by_run(self, run_id: str, *, tenant_id: str | None = None) -> Scenario | None:
+        sql = "SELECT payload FROM scenarios WHERE analysis_run_id=?"
+        params: list[Any] = [run_id]
+        if tenant_id is not None:
+            sql += " AND tenant_id=?"
+            params.append(tenant_id)
+        sql += " ORDER BY created_at DESC LIMIT 1"
+        row = self.db.query_one(sql, params)
         return Scenario.from_dict(_row_payload(row)) if row else None
 
-    def count_by_status(self) -> dict[str, int]:
-        rows = self.db.query("SELECT status, COUNT(*) AS n FROM scenarios GROUP BY status")
+    def count_by_status(self, *, tenant_id: str | None = None) -> dict[str, int]:
+        sql = "SELECT status, COUNT(*) AS n FROM scenarios"
+        params: list[Any] = []
+        if tenant_id is not None:
+            sql += " WHERE tenant_id=?"
+            params.append(tenant_id)
+        sql += " GROUP BY status"
+        rows = self.db.query(sql, params)
         return {row["status"]: int(row["n"]) for row in rows}
 
     def add_transition(self, transition: ScenarioTransition) -> None:
@@ -493,10 +582,10 @@ class RiskRepository:
     def save(self, decision: RiskDecision) -> None:
         self.db.execute(
             "INSERT OR REPLACE INTO risk_decisions (decision_id, scenario_id, instrument_id, approved, reason_code, policy_version, "
-            "created_at, valid_until, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "created_at, valid_until, payload, tenant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (decision.decision_id, decision.scenario_id, decision.instrument_id, 1 if decision.approved else 0,
              decision.reason_code.value, decision.policy_version, format_ts(decision.created_at),
-             format_ts(decision.valid_until), _dump(decision)),
+             format_ts(decision.valid_until), _dump(decision), decision.tenant_id),
         )
 
     def get(self, decision_id: str) -> RiskDecision:
@@ -505,13 +594,29 @@ class RiskRepository:
             raise NotFoundError(f"تصمیم ریسک {decision_id} یافت نشد.", details={"decision_id": decision_id})
         return self._decode(_row_payload(row))
 
+    def get_for_tenant(self, decision_id: str, tenant_id: str) -> RiskDecision:
+        decision = self.get(decision_id)
+        if decision.tenant_id != tenant_id:
+            raise NotFoundError(f"تصمیم ریسک {decision_id} یافت نشد.", details={"decision_id": decision_id})
+        return decision
+
     def latest_for_scenario(self, scenario_id: str) -> RiskDecision | None:
         row = self.db.query_one("SELECT payload FROM risk_decisions WHERE scenario_id=? ORDER BY created_at DESC LIMIT 1", (scenario_id,))
         return self._decode(_row_payload(row)) if row else None
 
-    def list(self, *, limit: int = 100, offset: int = 0) -> list[RiskDecision]:
-        rows = self.db.query("SELECT payload FROM risk_decisions ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset))
+    def list(self, *, limit: int = 100, offset: int = 0, tenant_id: str | None = None) -> list[RiskDecision]:
+        sql = "SELECT payload FROM risk_decisions"
+        params: list[Any] = []
+        if tenant_id is not None:
+            sql += " WHERE tenant_id=?"
+            params.append(tenant_id)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        rows = self.db.query(sql, params)
         return [self._decode(_row_payload(row)) for row in rows]
+
+    def count_by_tenant(self, tenant_id: str) -> int:
+        return int(self.db.scalar("SELECT COUNT(*) FROM risk_decisions WHERE tenant_id=?", (tenant_id,)) or 0)
 
     @staticmethod
     def _decode(data: dict[str, Any]) -> RiskDecision:
@@ -527,6 +632,7 @@ class RiskRepository:
             reason_detail=data.get("reason_detail", ""), valid_until=parse_ts(data["valid_until"]),
             created_at=parse_ts(data["created_at"]), inputs_hash=data.get("inputs_hash", ""),
             correlation_id=data.get("correlation_id", ""),
+            tenant_id=data.get("tenant_id", "default"),
         )
 
 
@@ -567,6 +673,11 @@ class DataQualityRepository:
             missing=int(data["missing"]), stale=bool(data["stale"]), verdict=data["verdict"],
             issues=tuple(DataQualityIssue(**item) for item in data.get("issues", [])),
             latest_bar_age_seconds=float(data.get("latest_bar_age_seconds", 0.0)),
+            expected=int(data.get("expected", 0)),
+            matched=int(data.get("matched", 0)),
+            extra=int(data.get("extra", 0)),
+            latest_expected_at=parse_ts(data["latest_expected_at"]) if data.get("latest_expected_at") else None,
+            latest_present_at=parse_ts(data["latest_present_at"]) if data.get("latest_present_at") else None,
         )
 
 
@@ -740,6 +851,39 @@ class SystemStateRepository:
         )
 
 
+class TenantRepository:
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def save(self, tenant: Tenant) -> None:
+        self.db.execute(
+            "INSERT INTO tenants (tenant_id, name, active, created_at, plan, quota_overrides) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(tenant_id) DO UPDATE SET name=excluded.name, active=excluded.active, "
+            "plan=excluded.plan, quota_overrides=excluded.quota_overrides",
+            (tenant.tenant_id, tenant.name, 1 if tenant.active else 0, format_ts(tenant.created_at),
+             tenant.plan, _dump(tenant.quota_overrides or {})),
+        )
+
+    def get(self, tenant_id: str) -> Tenant | None:
+        row = self.db.query_one("SELECT * FROM tenants WHERE tenant_id=?", (tenant_id,))
+        return self._decode(row) if row else None
+
+    def list(self) -> list[Tenant]:
+        return [self._decode(row) for row in self.db.query("SELECT * FROM tenants ORDER BY created_at")]
+
+    @staticmethod
+    def _decode(row: Any) -> Tenant:
+        return Tenant(
+            tenant_id=row["tenant_id"],
+            name=row["name"],
+            active=bool(row["active"]),
+            created_at=parse_ts(row["created_at"]),
+            plan=row["plan"] if "plan" in row.keys() else "basic",
+            quota_overrides=_load(row["quota_overrides"]) if "quota_overrides" in row.keys() else {},
+        )
+
+
 class UserRepository:
     def __init__(self, db: Database) -> None:
         self.db = db
@@ -764,6 +908,9 @@ class UserRepository:
 
     def list(self) -> list[User]:
         return [self._decode(row) for row in self.db.query("SELECT * FROM users ORDER BY username")]
+
+    def count_by_tenant(self, tenant_id: str) -> int:
+        return int(self.db.scalar("SELECT COUNT(*) FROM users WHERE tenant_id=?", (tenant_id,)) or 0)
 
     @staticmethod
     def _decode(row: Any) -> User:
@@ -945,6 +1092,11 @@ class AccountRepository:
                                 (account_id,))
         return _account_from_dict(_load(row["payload"])) if row else None
 
+    def latest_any(self) -> AccountSnapshot | None:
+        """آخرین تصویر حساب هر حساب؛ برای پیش‌فرض‌های هوشمند داشبورد."""
+        row = self.db.query_one("SELECT payload FROM account_snapshots ORDER BY taken_at DESC LIMIT 1")
+        return _account_from_dict(_load(row["payload"])) if row else None
+
 
 def _account_from_dict(data: dict[str, Any]) -> AccountSnapshot:
     positions = tuple(
@@ -976,27 +1128,90 @@ class OrderRepository:
 
     def save_intent(self, intent: OrderIntent) -> None:
         self.db.execute(
-            "INSERT OR REPLACE INTO order_intents (intent_id, client_order_id, risk_decision_id, instrument_id, status, created_at, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO order_intents (intent_id, client_order_id, risk_decision_id, instrument_id, status, created_at, payload, tenant_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (intent.intent_id, intent.client_order_id, intent.risk_decision_id, intent.instrument_id,
-             intent.status.value, format_ts(intent.created_at), _dump(intent.to_dict())),
+             intent.status.value, format_ts(intent.created_at), _dump(intent.to_dict()), intent.tenant_id),
         )
 
     def get_intent(self, intent_id: str) -> OrderIntent | None:
         row = self.db.query_one("SELECT payload FROM order_intents WHERE intent_id=?", (intent_id,))
         return OrderIntent.from_dict(_load(row["payload"])) if row else None
 
+    def get_intent_for_tenant(self, intent_id: str, tenant_id: str) -> OrderIntent | None:
+        intent = self.get_intent(intent_id)
+        return intent if intent is not None and intent.tenant_id == tenant_id else None
+
     def find_by_client_id(self, client_order_id: str) -> OrderIntent | None:
         row = self.db.query_one("SELECT payload FROM order_intents WHERE client_order_id=?", (client_order_id,))
         return OrderIntent.from_dict(_load(row["payload"])) if row else None
 
-    def list_intents_by_status(self, status: OrderStatus, *, limit: int = 500) -> list[OrderIntent]:
+    def count_intents_since(self, since: datetime) -> int:
+        """شمارش OrderIntentهای ایجادشده از یک زمان به بعد (سقف معاملات روزانه)."""
+        return int(self.db.scalar(
+            "SELECT COUNT(*) FROM order_intents WHERE created_at >= ?",
+            (format_ts(since),),
+        ) or 0)
+
+    def list_intents_by_status(self, status: OrderStatus, *, limit: int = 500,
+                               tenant_id: str | None = None) -> list[OrderIntent]:
         """P6-1: Find intents by status (used by ReconciliationService)."""
+        sql = "SELECT payload FROM order_intents WHERE status=?"
+        params: list[Any] = [status.value]
+        if tenant_id is not None:
+            sql += " AND tenant_id=?"
+            params.append(tenant_id)
+        sql += " ORDER BY created_at LIMIT ?"
+        params.append(limit)
+        rows = self.db.query(sql, params)
+        return [OrderIntent.from_dict(_load(row["payload"])) for row in rows]
+
+    def list_open_intents(self, tenant_id: str, *, limit: int = 200) -> list[OrderIntent]:
+        """سفارش‌های اجراشده که پوزیشن باز محسوب می‌شوند (منبع جایگزین بروکر)."""
         rows = self.db.query(
-            "SELECT payload FROM order_intents WHERE status=? ORDER BY created_at LIMIT ?",
-            (status.value, limit),
+            "SELECT payload FROM order_intents WHERE tenant_id=? AND status IN (?, ?) "
+            "ORDER BY created_at DESC LIMIT ?",
+            (tenant_id, OrderStatus.FILLED.value, OrderStatus.PARTIALLY_FILLED.value, limit),
         )
         return [OrderIntent.from_dict(_load(row["payload"])) for row in rows]
+
+    def latest_broker_order(self, intent_id: str) -> BrokerOrder | None:
+        row = self.db.query_one(
+            "SELECT broker_order_id FROM broker_orders WHERE intent_id=? "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (intent_id,),
+        )
+        return self.get_broker_order(row["broker_order_id"]) if row else None
+
+    def list_fills(self, intent_id: str) -> list[Fill]:
+        rows = self.db.query(
+            "SELECT f.payload FROM fills f "
+            "JOIN broker_orders b ON b.broker_order_id=f.broker_order_id "
+            "WHERE b.intent_id=? ORDER BY f.filled_at",
+            (intent_id,),
+        )
+        fills: list[Fill] = []
+        for row in rows:
+            data = _load(row["payload"])
+            fills.append(Fill(
+                fill_id=data["fill_id"],
+                broker_order_id=data["broker_order_id"],
+                volume=to_decimal(data["volume"]),
+                price=to_decimal(data["price"]),
+                commission=to_decimal(data.get("commission", 0)),
+                filled_at=parse_ts(data["filled_at"]),
+            ))
+        return fills
+
+    def list_by_tenant(self, tenant_id: str, *, limit: int = 1000) -> list[OrderIntent]:
+        rows = self.db.query(
+            "SELECT payload FROM order_intents WHERE tenant_id=? ORDER BY created_at DESC LIMIT ?",
+            (tenant_id, limit),
+        )
+        return [OrderIntent.from_dict(_load(row["payload"])) for row in rows]
+
+    def count_by_tenant(self, tenant_id: str) -> int:
+        return int(self.db.scalar("SELECT COUNT(*) FROM order_intents WHERE tenant_id=?", (tenant_id,)) or 0)
 
     def save_broker_order(self, order: BrokerOrder) -> None:
         self.db.execute(
@@ -1022,6 +1237,96 @@ class OrderRepository:
             "INSERT OR REPLACE INTO fills (fill_id, broker_order_id, filled_at, payload) VALUES (?, ?, ?, ?)",
             (fill.fill_id, fill.broker_order_id, format_ts(fill.filled_at), _dump(fill.to_dict())),
         )
+
+
+class ClosedTradeRepository:
+    """معاملات بسته‌شده با نتیجه واقعی بروکر؛ کلید idempotent همان intent_id است."""
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def save(self, trade: ClosedTrade) -> None:
+        self.db.execute(
+            "INSERT INTO closed_trades "
+            "(trade_id, intent_id, tenant_id, instrument_id, side, scenario_id, closed_at, volume, net_profit, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(intent_id) DO UPDATE SET "
+            "trade_id=excluded.trade_id, tenant_id=excluded.tenant_id, instrument_id=excluded.instrument_id, "
+            "side=excluded.side, scenario_id=excluded.scenario_id, closed_at=excluded.closed_at, "
+            "volume=excluded.volume, net_profit=excluded.net_profit, payload=excluded.payload",
+            (trade.trade_id, trade.intent_id, trade.tenant_id, trade.instrument_id, trade.side.value,
+             trade.scenario_id, format_ts(trade.closed_at), format(trade.volume, "f"),
+             format(trade.net_profit, "f"), _dump(trade.to_dict())),
+        )
+
+    def get(self, trade_id: str) -> ClosedTrade | None:
+        row = self.db.query_one("SELECT payload FROM closed_trades WHERE trade_id=?", (trade_id,))
+        return ClosedTrade.from_dict(_load(row["payload"])) if row else None
+
+    def find_by_intent(self, intent_id: str, *, tenant_id: str | None = None) -> ClosedTrade | None:
+        sql = "SELECT payload FROM closed_trades WHERE intent_id=?"
+        params: list[Any] = [intent_id]
+        if tenant_id is not None:
+            sql += " AND tenant_id=?"
+            params.append(tenant_id)
+        row = self.db.query_one(sql, params)
+        return ClosedTrade.from_dict(_load(row["payload"])) if row else None
+
+    def list(self, *, tenant_id: str, since: datetime | None = None, until: datetime | None = None,
+             instrument_id: str | None = None, limit: int = 100, offset: int = 0) -> list[ClosedTrade]:
+        sql = "SELECT payload FROM closed_trades WHERE tenant_id=?"
+        params: list[Any] = [tenant_id]
+        if since is not None:
+            sql += " AND closed_at>=?"
+            params.append(format_ts(since))
+        if until is not None:
+            sql += " AND closed_at<=?"
+            params.append(format_ts(until))
+        if instrument_id:
+            sql += " AND instrument_id=?"
+            params.append(instrument_id)
+        sql += " ORDER BY closed_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        return [ClosedTrade.from_dict(_load(row["payload"])) for row in self.db.query(sql, params)]
+
+    def count(self, tenant_id: str) -> int:
+        return int(self.db.scalar("SELECT COUNT(*) FROM closed_trades WHERE tenant_id=?", (tenant_id,)) or 0)
+
+
+class ApprovalRepository:
+    """ذخیره تأیید چهارچشمی سفارش‌ها در فاز ASSISTED."""
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def save(self, approval: OrderApproval) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO order_approvals "
+            "(intent_id, status, requested_by, requested_at, expires_at, approved_by, decided_at, reason, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                approval.intent_id,
+                approval.status.value,
+                approval.requested_by,
+                format_ts(approval.requested_at),
+                format_ts(approval.expires_at),
+                approval.approved_by or None,
+                format_ts(approval.decided_at) if approval.decided_at else None,
+                approval.reason,
+                _dump(approval.to_dict()),
+            ),
+        )
+
+    def get(self, intent_id: str) -> OrderApproval | None:
+        row = self.db.query_one("SELECT payload FROM order_approvals WHERE intent_id=?", (intent_id,))
+        return OrderApproval.from_dict(_load(row["payload"])) if row else None
+
+    def list_pending(self, *, limit: int = 100) -> list[OrderApproval]:
+        rows = self.db.query(
+            "SELECT payload FROM order_approvals WHERE status='PENDING' ORDER BY requested_at LIMIT ?",
+            (limit,),
+        )
+        return [OrderApproval.from_dict(_load(row["payload"])) for row in rows]
 
 
 class ModelRepository:

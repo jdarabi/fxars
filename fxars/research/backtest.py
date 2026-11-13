@@ -190,7 +190,7 @@ class BacktestEngine:
         self._tf_minutes = _TF.parse(timeframe).minutes
         # FIX-09-PRECOMPUTE: کش Structure و Indicator
         self._precomputed_indicators = None
-        self._precomputed_structure_per_bar = None
+        self._precomputed_swings = None  # FIX-12-PRECOMPUTE-COMMENT
         # FIX-05-BACKTEST-PARITY: builder/evaluator برای حالت scenario
         from fxars.decision.scenario import ScenarioBuilder
         from fxars.decision.trigger import TriggerEvaluator
@@ -225,7 +225,7 @@ class BacktestEngine:
         # راه‌حل: یک بار Structure روی کل سری، سپس در هر کندل فقط swingهای تأییدشده تا i.
         # این کار در simulate انجام می‌شود که هر بار یک پنجره کوچک می‌گیرد.
         # فعلاً فقط indicators را precompute می‌کنیم.
-        self._precomputed_structure_per_bar = None  # فعلاً پیاده نشده
+        self._precomputed_swings = None  # FIX-12-PRECOMPUTE-COMMENT  # فعلاً پیاده نشده
 
         # P1a: precompute swings once on full series
         from fxars.analysis.structure import find_swings
@@ -693,3 +693,9 @@ def default_backtest_config(
 
 # FIX-05-ENGINE-DONE
 # P3-4-ext2: regime filter support
+
+# FIX-12-PRECOMPUTE-COMMENT
+
+# FIX-07-PRECOMPUTE-CLEANUP
+
+# FIX-07-PRECOMPUTE-CLEANUP-V3: _precomputed_structure_per_bar حذف شد (پیاده‌نشده)

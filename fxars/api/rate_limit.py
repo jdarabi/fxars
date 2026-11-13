@@ -10,15 +10,23 @@ logger = logging.getLogger('fxars.api.rate_limit')
 
 
 class MemoryRateLimiter:
-    def __init__(self, limit, window_seconds=60):
+    # FIX-07-MAX-BUCKETS: جلوگیری از memory exhaustion با محدودیت تعداد bucket
+    DEFAULT_MAX_BUCKETS = 10000
+
+    def __init__(self, limit, window_seconds=60, *, max_buckets=None):
         self.limit = limit
         self.window = window_seconds
         self._hits = defaultdict(deque)
         self._lock = threading.Lock()
+        self._max_buckets = max_buckets or self.DEFAULT_MAX_BUCKETS
+        self._eviction_count = 0
 
     def allow(self, key):
         now = time.monotonic()
         with self._lock:
+            # FIX-07-MAX-BUCKETS: eviction قبل از افزودن bucket جدید
+            if key not in self._hits and len(self._hits) >= self._max_buckets:
+                self._evict_oldest()
             bucket = self._hits[key]
             while bucket and now - bucket[0] > self.window:
                 bucket.popleft()
@@ -26,6 +34,22 @@ class MemoryRateLimiter:
                 return False
             bucket.append(now)
             return True
+
+    def _evict_oldest(self):
+        """حذف قدیمی‌ترین bucket برای آزاد کردن حافظه."""
+        if not self._hits:
+            return
+        # پیدا کردن bucket با قدیمی‌ترین آخرین hit
+        oldest_key = min(
+            self._hits.items(),
+            key=lambda kv: kv[1][-1] if kv[1] else 0.0,
+        )[0]
+        del self._hits[oldest_key]
+        self._eviction_count += 1
+
+    @property
+    def eviction_count(self):
+        return self._eviction_count
 
     def hits_for(self, key):
         now = time.monotonic()
@@ -41,11 +65,17 @@ class MemoryRateLimiter:
         now = time.monotonic()
         with self._lock:
             result = {}
+            empty_keys = []
             for key, bucket in list(self._hits.items()):
                 while bucket and now - bucket[0] > self.window:
                     bucket.popleft()
                 if bucket:
                     result[key] = len(bucket)
+                else:
+                    empty_keys.append(key)
+            # FIX-07-MAX-BUCKETS: پاکسازی bucketهای خالی
+            for k in empty_keys:
+                del self._hits[k]
             return result
 
 

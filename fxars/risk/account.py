@@ -42,7 +42,8 @@ def parse_account_snapshot(data: dict[str, Any], *, now: datetime | None = None)
         peak_equity=to_decimal(data.get("peak_equity", equity)),
         daily_pnl=to_decimal(data.get("daily_pnl", "0")),
         leverage=to_decimal(data.get("leverage", "100")),
-        open_positions=int(data.get("open_positions", len(positions))),
+        # FIX-06-MAX-POSITIONS: از max استفاده کن تا تناقض پنهان نشود
+        open_positions=max(int(data.get("open_positions", len(positions))), len(positions)),
         taken_at=moment,
         positions=positions,
         max_daily_loss=to_decimal(data["max_daily_loss"]) if data.get("max_daily_loss") else None,

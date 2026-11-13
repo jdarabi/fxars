@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import sys
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path as _P
+from types import SimpleNamespace
 
 _ROOT = _P(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
@@ -67,6 +69,64 @@ class MT5FeedLiveTests(unittest.TestCase):
         new = self.feed.fetch_new('EURUSD', 'H1', since=older.open_time, count=20)
         for c in new:
             self.assertGreater(c.open_time, older.open_time)
+
+
+class _FakeRow(dict):
+    def __init__(self, values, names):
+        super().__init__(values)
+        self.dtype = SimpleNamespace(names=names)
+
+
+class _FakeRates(list):
+    def __init__(self, rows, names):
+        super().__init__(_FakeRow(row, names) for row in rows)
+
+
+class _FakeMT5:
+    TIMEFRAME_M1 = 1
+    TIMEFRAME_H1 = 2
+
+    def __init__(self, h1_wall: datetime | None = None) -> None:
+        self._now = datetime.now(tz=UTC)
+        self._h1_wall = h1_wall or datetime(2026, 11, 6, 21, tzinfo=UTC)
+
+    def copy_rates_from_pos(self, symbol, timeframe, pos, count):
+        if timeframe == self.TIMEFRAME_M1:
+            server_now = self._now + timedelta(hours=2)
+            return _FakeRates([{"time": int(server_now.timestamp())}], ("time",))
+        return _FakeRates(
+            [{
+                "time": int(self._h1_wall.timestamp()),
+                "open": 1.1, "high": 1.2, "low": 1.0, "close": 1.15,
+                "tick_volume": 100, "spread": 10,
+            }],
+            ("time", "open", "high", "low", "close", "tick_volume", "spread"),
+        )
+
+    def symbol_info(self, symbol):
+        return SimpleNamespace(point=0.00001)
+
+
+class HistoryOffsetTests(unittest.TestCase):
+    """CSV تاریخچه نیز باید مثل فید زنده اختلاف زمان سرور را حذف کند."""
+
+    def test_download_applies_broker_offset(self) -> None:
+        from fxars.live.history import download_from_mt5
+
+        candles = download_from_mt5(symbol="EURUSD", timeframe="H1", bars=1, mt5=_FakeMT5())
+
+        self.assertEqual(len(candles), 1)
+        self.assertEqual(candles[0].open_time, datetime(2026, 11, 6, 19, tzinfo=UTC))
+        self.assertEqual(candles[0].available_at, datetime(2026, 11, 6, 20, tzinfo=UTC))
+
+    def test_download_applies_summer_dst_offset(self) -> None:
+        from fxars.live.history import download_from_mt5
+
+        # زمان دیواری سرور در ژوئیه (UTC+3) باید ۳ ساعت به عقب برود، نه ۲ ساعت.
+        fake = _FakeMT5(h1_wall=datetime(2026, 7, 8, 12, tzinfo=UTC))
+        candles = download_from_mt5(symbol="EURUSD", timeframe="H1", bars=1, mt5=fake)
+
+        self.assertEqual(candles[0].open_time, datetime(2026, 7, 8, 9, tzinfo=UTC))
 
 
 if __name__ == '__main__':

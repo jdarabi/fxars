@@ -93,8 +93,89 @@ CREATE TABLE IF NOT EXISTS scenarios (
 """
 
 
+_CLOSED_TRADES = """
+CREATE TABLE IF NOT EXISTS closed_trades (
+    trade_id      TEXT PRIMARY KEY,
+    intent_id     TEXT NOT NULL UNIQUE,
+    tenant_id     TEXT NOT NULL DEFAULT 'default',
+    instrument_id TEXT NOT NULL,
+    side          TEXT NOT NULL,
+    scenario_id   TEXT,
+    closed_at     TEXT NOT NULL,
+    volume        TEXT NOT NULL,
+    net_profit    TEXT NOT NULL,
+    payload       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_closed_trades_tenant ON closed_trades (tenant_id, closed_at);
+CREATE INDEX IF NOT EXISTS idx_closed_trades_instrument ON closed_trades (instrument_id, closed_at);
+"""
+
+_SUPPLEMENT_GOVERNANCE = """
+CREATE TABLE IF NOT EXISTS decision_provenance (
+    record_id       TEXT PRIMARY KEY,
+    decision_id     TEXT NOT NULL,
+    analysis_run_id TEXT NOT NULL,
+    scenario_id     TEXT,
+    tenant_id       TEXT NOT NULL DEFAULT 'default',
+    created_at      TEXT NOT NULL,
+    prev_hash       TEXT NOT NULL,
+    record_hash     TEXT NOT NULL,
+    payload         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provenance_run ON decision_provenance (analysis_run_id);
+CREATE INDEX IF NOT EXISTS idx_provenance_decision ON decision_provenance (decision_id);
+CREATE TABLE IF NOT EXISTS policy_registry (
+    policy_id  TEXT NOT NULL,
+    version    TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    payload    TEXT NOT NULL,
+    PRIMARY KEY (policy_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_policy_kind ON policy_registry (kind, status);
+CREATE TABLE IF NOT EXISTS decision_journal (
+    entry_id        TEXT PRIMARY KEY,
+    tenant_id       TEXT NOT NULL DEFAULT 'default',
+    analysis_run_id TEXT,
+    scenario_id     TEXT,
+    decision_id     TEXT,
+    kind            TEXT NOT NULL,
+    actor           TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    payload         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_journal_tenant ON decision_journal (tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_journal_scenario ON decision_journal (scenario_id);
+CREATE TABLE IF NOT EXISTS model_drift (
+    drift_id    TEXT PRIMARY KEY,
+    model_id    TEXT NOT NULL,
+    detected_at TEXT NOT NULL,
+    payload     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS scenario_challenges (
+    challenge_id TEXT PRIMARY KEY,
+    scenario_id  TEXT NOT NULL,
+    tenant_id    TEXT NOT NULL DEFAULT 'default',
+    created_at   TEXT NOT NULL,
+    actor        TEXT NOT NULL,
+    payload      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_challenge_scenario ON scenario_challenges (scenario_id);
+"""
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, name="initial_schema", up_sql=_INITIAL_SCHEMA, down_sql=""),
+    Migration(version=2, name="closed_trades", up_sql=_CLOSED_TRADES,
+              down_sql="DROP TABLE IF EXISTS closed_trades;"),
+    Migration(version=3, name="supplement_governance", up_sql=_SUPPLEMENT_GOVERNANCE,
+              down_sql=(
+                  "DROP TABLE IF EXISTS scenario_challenges;"
+                  "DROP TABLE IF EXISTS model_drift;"
+                  "DROP TABLE IF EXISTS decision_journal;"
+                  "DROP TABLE IF EXISTS policy_registry;"
+                  "DROP TABLE IF EXISTS decision_provenance;"
+              )),
 )
 
 

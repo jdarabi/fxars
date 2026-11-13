@@ -47,9 +47,13 @@ ALLOWED: dict[OrderStatus, set[OrderStatus]] = {
         OrderStatus.EXPIRED,
         # FIX-P6-5: partial fill + later connection loss -> UNKNOWN
         OrderStatus.UNKNOWN,
+        # FIX-CLOSE-1: بروکر نه پوزیشن باز دارد نه تاریخچه بسته‌شدن
+        OrderStatus.RECONCILIATION_REQUIRED,
     },
     OrderStatus.FILLED: {
         OrderStatus.CLOSED,
+        # FIX-CLOSE-1: پوزیشن باز نیست ولی تاریخچه بسته‌شدن در دسترس نیست
+        OrderStatus.RECONCILIATION_REQUIRED,
     },
     OrderStatus.UNKNOWN: {
         OrderStatus.RECONCILIATION_REQUIRED,

@@ -17,7 +17,7 @@ from fxars.domain.enums import Role
 from fxars.domain.models import SessionRecord, User
 from fxars.identity.passwords import SecretBox, hash_password, verify_password
 from fxars.identity.totp import generate_secret, verify_totp
-from fxars.storage.repositories import LoginAttemptRepository, SessionRepository, UserRepository
+from fxars.storage.repositories import LoginAttemptRepository, SessionRepository, TenantRepository, UserRepository
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 
@@ -39,6 +39,9 @@ class IdentityService:
         sessions: SessionRepository,
         attempts: LoginAttemptRepository,
         audit: AuditLog,
+        tenants: TenantRepository | None = None,
+        quota=None,
+        key_provider=None,
     ) -> None:
         self.settings = settings
         self.clock = clock
@@ -46,7 +49,16 @@ class IdentityService:
         self.sessions = sessions
         self.attempts = attempts
         self.audit = audit
-        self.secrets = SecretBox(settings.security.secret_key)
+        self.tenants = tenants
+        self.quota = quota
+        if key_provider is None:
+            from fxars.security.kms import build_key_provider
+
+            key_provider = build_key_provider(settings)
+        self.key_provider = key_provider
+        self.secrets = SecretBox.from_provider(
+            key_provider, legacy_key_material=settings.security.secret_key
+        )
 
     # ------------------------------------------------------------------ کاربران
     def create_user(
@@ -58,9 +70,19 @@ class IdentityService:
         totp_enabled: bool = False,
         display_name: str = "",
         actor: str = "system",
+        tenant_id: str = "default",
     ) -> tuple[User, str | None]:
         if not USERNAME_RE.match(username):
             raise ValidationError("نام کاربری باید ۳ تا ۳۲ کاراکتر و شامل حروف/اعداد/._- باشد.")
+        if self.tenants is not None:
+            tenant = self.tenants.get(tenant_id)
+            if tenant is None or not tenant.active:
+                raise ValidationError(
+                    f"مستاجر {tenant_id} وجود ندارد یا غیرفعال است.",
+                    details={"tenant_id": tenant_id},
+                )
+        if self.quota is not None:
+            self.quota.check_user(tenant_id)
         role = Role(role)
         if self.users.get_by_username(username) is not None:
             raise ValidationError(f"نام کاربری {username} قبلاً ثبت شده است.")
@@ -81,7 +103,7 @@ class IdentityService:
             totp_secret_enc=encrypted,
             active=True,
             created_at=self.clock(),
-            tenant_id="default",
+            tenant_id=tenant_id,
             display_name=display_name or username,
         )
         self.users.save(user)

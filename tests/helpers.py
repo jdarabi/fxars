@@ -7,7 +7,12 @@ from datetime import UTC, datetime, timedelta
 from fxars.config.settings import Settings
 from fxars.data.synthetic import generate_candles, generate_reference_candles
 from fxars.domain.enums import Role
-from fxars.instruments.calendar import TradingCalendar, default_holidays
+from fxars.instruments.calendar import (
+    TradingCalendar,
+    default_early_closes,
+    default_holidays,
+    default_metal_holidays,
+)
 from fxars.platform import Platform
 from fxars.storage.db import Database
 
@@ -45,10 +50,17 @@ class TestEnv:
             "db_path": ":memory:",
             "environment": environment,
         })
-        self.calendar = TradingCalendar(default_holidays())
+        self.calendar = TradingCalendar(
+            default_holidays(),
+            early_closes=default_early_closes(),
+            metal_holidays=default_metal_holidays(),
+        )
         start = datetime(2026, 2, 1, 22, 0, tzinfo=UTC)
         self.clock = Clock(start)
-        self.platform = Platform(self.settings, db=Database(":memory:"), clock=self.clock, calendar=self.calendar)
+        self.platform = Platform(
+            self.settings, db=Database(":memory:"), clock=self.clock,
+            calendar=self.calendar, sync_phase=False,
+        )
         self.platform.bootstrap(create_users=False)
         self.instrument = self.platform.instruments.get("EURUSD")
         self.candles = generate_candles(self.instrument, start, bars, seed=21, calendar=self.calendar)
@@ -84,3 +96,16 @@ def make_env(
     phase: str = "READ_ONLY",
 ) -> TestEnv:
     return TestEnv(bars=bars, users=users, environment=environment, phase=phase)
+
+
+def force_triggered(platform, scenario_id: str):
+    """FIX-DUAL: سناریو را به TRIGGERED می‌برد (برای تست‌های E2E فاز خودکار)."""
+    from fxars.domain.enums import ScenarioStatus
+    scenario = platform.scenarios.get(scenario_id)
+    if scenario.status is ScenarioStatus.TRIGGERED:
+        return scenario
+    scenario = scenario.with_status(
+        ScenarioStatus.TRIGGERED, when=platform.clock(),
+    )
+    platform.scenarios.save(scenario)
+    return scenario

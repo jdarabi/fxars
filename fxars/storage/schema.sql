@@ -115,7 +115,8 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
     evidence_count    INTEGER NOT NULL,
     decision          TEXT NOT NULL,
     data_quality      TEXT NOT NULL,
-    error             TEXT
+    error             TEXT,
+    tenant_id         TEXT NOT NULL DEFAULT 'default'
 );
 CREATE INDEX IF NOT EXISTS idx_analysis_instrument ON analysis_runs (instrument_id, timeframe, as_of);
 
@@ -144,7 +145,8 @@ CREATE TABLE IF NOT EXISTS scenarios (
     updated_at       TEXT NOT NULL,
     risk_decision_id TEXT,
     analysis_run_id  TEXT NOT NULL,
-    payload          TEXT NOT NULL
+    payload          TEXT NOT NULL,
+    tenant_id        TEXT NOT NULL DEFAULT 'default'
 );
 CREATE INDEX IF NOT EXISTS idx_scenarios_status ON scenarios (status, instrument_id);
 
@@ -172,7 +174,8 @@ CREATE TABLE IF NOT EXISTS risk_decisions (
     policy_version TEXT NOT NULL,
     created_at    TEXT NOT NULL,
     valid_until   TEXT NOT NULL,
-    payload       TEXT NOT NULL
+    payload       TEXT NOT NULL,
+    tenant_id     TEXT NOT NULL DEFAULT 'default'
 );
 CREATE INDEX IF NOT EXISTS idx_risk_scenario ON risk_decisions (scenario_id, created_at);
 
@@ -247,6 +250,15 @@ CREATE TABLE IF NOT EXISTS system_state (
     updated_by TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS tenants (
+    tenant_id       TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    active          INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL,
+    plan            TEXT NOT NULL DEFAULT 'basic',
+    quota_overrides TEXT NOT NULL DEFAULT '{}'
+);
+
 CREATE TABLE IF NOT EXISTS users (
     user_id         TEXT PRIMARY KEY,
     username        TEXT NOT NULL UNIQUE,
@@ -304,7 +316,8 @@ CREATE TABLE IF NOT EXISTS order_intents (
     instrument_id     TEXT NOT NULL,
     status            TEXT NOT NULL,
     created_at        TEXT NOT NULL,
-    payload           TEXT NOT NULL
+    payload           TEXT NOT NULL,
+    tenant_id         TEXT NOT NULL DEFAULT 'default'
 );
 
 CREATE TABLE IF NOT EXISTS broker_orders (
@@ -322,6 +335,33 @@ CREATE TABLE IF NOT EXISTS fills (
     payload         TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS closed_trades (
+    trade_id      TEXT PRIMARY KEY,
+    intent_id     TEXT NOT NULL UNIQUE,
+    tenant_id     TEXT NOT NULL DEFAULT 'default',
+    instrument_id TEXT NOT NULL,
+    side          TEXT NOT NULL,
+    scenario_id   TEXT,
+    closed_at     TEXT NOT NULL,
+    volume        TEXT NOT NULL,
+    net_profit    TEXT NOT NULL,
+    payload       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_closed_trades_tenant ON closed_trades (tenant_id, closed_at);
+CREATE INDEX IF NOT EXISTS idx_closed_trades_instrument ON closed_trades (instrument_id, closed_at);
+
+CREATE TABLE IF NOT EXISTS order_approvals (
+    intent_id    TEXT PRIMARY KEY,
+    status       TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    expires_at   TEXT NOT NULL,
+    approved_by  TEXT,
+    decided_at   TEXT,
+    reason       TEXT NOT NULL DEFAULT '',
+    payload      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS model_registry (
     model_id TEXT NOT NULL,
     version  TEXT NOT NULL,
@@ -337,3 +377,60 @@ CREATE TABLE IF NOT EXISTS locked_test_access (
     actor      TEXT NOT NULL,
     purpose    TEXT NOT NULL
 );
+
+-- SUPPLEMENT-1.1: حاکمیت، منشأ تصمیم و قابلیت‌های محصول
+CREATE TABLE IF NOT EXISTS decision_provenance (
+    record_id       TEXT PRIMARY KEY,
+    decision_id     TEXT NOT NULL,
+    analysis_run_id TEXT NOT NULL,
+    scenario_id     TEXT,
+    tenant_id       TEXT NOT NULL DEFAULT 'default',
+    created_at      TEXT NOT NULL,
+    prev_hash       TEXT NOT NULL,
+    record_hash     TEXT NOT NULL,
+    payload         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provenance_run ON decision_provenance (analysis_run_id);
+CREATE INDEX IF NOT EXISTS idx_provenance_decision ON decision_provenance (decision_id);
+
+CREATE TABLE IF NOT EXISTS policy_registry (
+    policy_id  TEXT NOT NULL,
+    version    TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    payload    TEXT NOT NULL,
+    PRIMARY KEY (policy_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_policy_kind ON policy_registry (kind, status);
+
+CREATE TABLE IF NOT EXISTS decision_journal (
+    entry_id        TEXT PRIMARY KEY,
+    tenant_id       TEXT NOT NULL DEFAULT 'default',
+    analysis_run_id TEXT,
+    scenario_id     TEXT,
+    decision_id     TEXT,
+    kind            TEXT NOT NULL,
+    actor           TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    payload         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_journal_tenant ON decision_journal (tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_journal_scenario ON decision_journal (scenario_id);
+
+CREATE TABLE IF NOT EXISTS model_drift (
+    drift_id   TEXT PRIMARY KEY,
+    model_id   TEXT NOT NULL,
+    detected_at TEXT NOT NULL,
+    payload    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scenario_challenges (
+    challenge_id TEXT PRIMARY KEY,
+    scenario_id  TEXT NOT NULL,
+    tenant_id    TEXT NOT NULL DEFAULT 'default',
+    created_at   TEXT NOT NULL,
+    actor        TEXT NOT NULL,
+    payload      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_challenge_scenario ON scenario_challenges (scenario_id);

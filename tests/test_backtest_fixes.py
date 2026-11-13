@@ -25,7 +25,7 @@ class SwapTimeframeTests(unittest.TestCase):
             engine = BacktestEngine(env.instrument, "H1", config, env.settings.analysis)
             # nights = 24 bars * 60 min / 1440 = 1 day
             # swap = -2.5 * 1.0 volume * 1.0 night = -2.5
-            assert engine._tf_minutes == 60
+            self.assertEqual(engine._tf_minutes, 60)
         finally:
             env.close()
 
@@ -36,7 +36,7 @@ class SwapTimeframeTests(unittest.TestCase):
             config = BacktestConfig()
             engine = BacktestEngine(env.instrument, "H4", config, env.settings.analysis)
             # H4 → 240 min
-            assert engine._tf_minutes == 240
+            self.assertEqual(engine._tf_minutes, 240)
         finally:
             env.close()
 
@@ -83,7 +83,7 @@ class GapStopTests(unittest.TestCase):
             )
             # اگر gap رعایت شود، PnL منفی‌تر از حالت بدون gap است
             # entry=1.09, exit=1.08 → loss 0.01 * 0.1 * 100000 = -100
-            assert abs(trade["pnl"] - (-100.0)) < 1.0, f"pnl={trade['pnl']}"
+            self.assertLess(abs(trade["pnl"] - (-100.0)), 1.0, f"pnl={trade['pnl']}")
         finally:
             env.close()
 
@@ -96,9 +96,9 @@ class FallbackStatsTests(unittest.TestCase):
         try:
             result = env.platform.research.run("EURUSD", "H1", persist=False)
             stats = result.run.metrics.get("stats", {})
-            assert "fallback_count" in stats, f"missing fallback_count in {stats.keys()}"
-            assert "fallback_errors" in stats
-            assert isinstance(stats["fallback_count"], int)
+            self.assertIn("fallback_count", stats, f"missing fallback_count in {stats.keys()}")
+            self.assertIn("fallback_errors", stats)
+            self.assertTrue(isinstance(stats["fallback_count"], int))
         finally:
             env.close()
 

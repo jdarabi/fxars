@@ -24,10 +24,13 @@ Ports/Repositories ──► Infrastructure (SQLite, CSV/Synthetic feed, Paper b
 | Instrument & Calendar | مشخصات قراردادی، سشن، تعطیلات، نگاشت نماد | تحمیل منبع به تحلیل |
 | Market Analysis | ویژگی‌ها و Evidence | ارسال سفارش |
 | Scenario & Decision | تجمیع شواهد، سناریو، NO TRADE | دور زدن ریسک |
-| Risk | sizing، محدودیت‌ها، RiskDecision، Kill Switch | مصرف داده بدون قرارداد |
+| Decision Intelligence | DTS، گراف شواهد، امتیاز ترکیبی، عدم‌قطعیت، ژورنال/بازپخش/پیش‌مرگ/چالش | صدور سفارش |
+| Governance | Policy Registry، Model Card/Tier، Provenance زنجیره‌ای | دور زدن ممیزی |
+| Risk | sizing، محدودیت‌ها، RiskDecision، قفل ریسک، Kill Switch سطح‌دار | مصرف داده بدون قرارداد |
 | Research | بک‌تست، OOS، Walk-forward، گزارش | نگاه به آینده |
 | Execution | OrderIntent، آداپتر، تطبیق | بازتعریف تحلیل/ریسک |
 | Identity | کاربر، نقش، مجوز، نشست، MFA | اعمال مجوز فقط در UI |
+| Tenancy | جداسازی `tenant_id`، پلن/سهمیه اشتراک، حقوق داده، ممیزی امنیت | دور زدن سهمیه در سرویس |
 | Audit & Outbox | ممیزی زنجیره‌ای، رویداد | ثبت اسرار |
 
 ## ۳. جریان اجرای تحلیل
@@ -35,12 +38,23 @@ Ports/Repositories ──► Infrastructure (SQLite, CSV/Synthetic feed, Paper b
 1. `AnalysisService.run` کندل‌های **بسته و قابل استفاده** تا `available_at ≤ as_of` را می‌خواند.
 2. تازگی داده با تقویم سشن سنجیده می‌شود؛ کهنه ⇒ اجرای `STALE` و `NO TRADE/DATA_STALE`.
 3. `snapshot_id` از محتوای کندل‌ها و `config_hash` از پیکربندی ساخته می‌شود؛ `run_id` از این دو + زمان تصمیم.
-4. `AnalysisEngine` اندیکاتورها و ۸ ماژول را اجرا و `Evidence` تولید می‌کند.
-5. `aggregate_evidence` شواهد را در خانواده‌ها تجمیع و تصمیم/NO TRADE صادر می‌کند.
-6. `ScenarioBuilder` سناریوی جهت‌دار با Trigger/Invalidation/Expiry/Stop/Targets می‌سازد.
-7. `AnalysisRun`، Evidenceهای پنجره اخیر، سناریو و Transition در یک تراکنش ذخیره و Audit/Outbox ثبت می‌شوند.
+4. `compute_data_trust` پنج مؤلفه DTS را می‌سنجد؛ `UNTRUSTED` ⇒ `NO_TRADE/DATA_UNTRUSTED`.
+5. `AnalysisEngine` اندیکاتورها و ۸ ماژول را اجرا و `Evidence` تولید می‌کند.
+6. `build_evidence_graph` روابط/تکرار شواهد و `composite_score` امتیاز `S = Σw·E·R·F − P_conflict` را می‌سازد.
+7. `compute_uncertainty` بودجه `U` را می‌سنجد؛ عبور از سقف ⇒ `NO_TRADE/UNCERTAINTY_TOO_HIGH`.
+8. `aggregate_evidence` شواهد را در خانواده‌ها تجمیع و تصمیم/NO TRADE صادر می‌کند.
+9. `ScenarioBuilder` سناریوی جهت‌دار با Trigger/Invalidation/Expiry/Stop/Targets می‌سازد.
+10. `AnalysisRun`، Evidenceهای پنجره اخیر، سناریو، Transition و `DecisionProvenance` در یک تراکنش ذخیره و Audit/Outbox ثبت می‌شوند.
 
 زمان تصمیم = `latest.available_at` (نه ساعت دیواری)؛ تازگی نسب به ساعت درخواست سنجیده می‌شود. این تفکیک از نگاه به آینده و از انقضای کاذب سناریو در تعطیلات جلوگیری می‌کند.
+
+### ۳-۱. جریان ریسک، قفل و حاکمیت
+
+1. `RiskService.evaluate` زیان روزانه و زیان هفتگی محقق‌شده (`closed_trades`) را به کسر سرمایه تبدیل می‌کند.
+2. `RiskLockMachine.evaluate` وضعیت را به‌روز می‌کند؛ گذارهای مسدودکننده در `system_state` و Audit ثبت می‌شوند.
+3. `RiskGate` کنترل‌های `risk_lock_clear`، `weekly_loss_within_limit`، `market_open` و کنترل‌های قبلی را اجرا می‌کند.
+4. `ExecutionService` فقط با RiskDecision تأییدشده/تازه، قفل باز، Kill Switch غیرفعال و فاز مجاز سفارش می‌سازد.
+5. `PolicyRegistry` و `ModelRegistryService` نسخه فعال و شرایط انتشار را نگه می‌دارند؛ `DecisionProvenanceStore` زنجیره هش تحلیل‌ها را حفظ می‌کند.
 
 ## ۴. مدل اطلاعاتی (SQLite)
 
@@ -53,8 +67,9 @@ Ports/Repositories ──► Infrastructure (SQLite, CSV/Synthetic feed, Paper b
 - `data_quality_runs`, `backtest_runs`
 - `audit_events` (Trigger ضد UPDATE/DELETE)، `outbox`, `outbox_consumed`
 - `users`, `sessions`, `login_attempts`, `idempotency_keys`
-- `order_intents`, `broker_orders`, `fills` (فاز اجرا)
-- `system_state` (Kill Switch)، `locked_test_access`, `model_registry`
+- `order_intents`, `broker_orders`, `fills`, `closed_trades` (فاز اجرا)
+- `system_state` (Kill Switch و قفل ریسک)، `locked_test_access`, `model_registry`, `model_drift`
+- `decision_provenance` (زنجیره هش)، `policy_registry`, `decision_journal`, `scenario_challenges`
 
 قیمت/پول/حجم/نرخ همه `Decimal` و به‌صورت رشته ذخیره می‌شوند. زمان‌ها ISO-8601 UTC با `Z`.
 

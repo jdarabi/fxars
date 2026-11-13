@@ -10,6 +10,7 @@ from fxars.core.numerics import to_decimal
 from fxars.core.timeutil import floor_to_timeframe, utcnow
 from fxars.domain.enums import QualityStatus, Timeframe
 from fxars.domain.models import Candle, Instrument
+from fxars.instruments.calendar import TradingCalendar
 
 
 @dataclass(frozen=True)
@@ -27,10 +28,11 @@ class CandleValidator:
     """قواعد ساختاری هر کندل؛ قواعد توالی در DataQualityEngine اعمال می‌شود."""
 
     def __init__(self, instrument: Instrument, *, max_spread_pips: Decimal = Decimal("20"),
-                 now: datetime | None = None) -> None:
+                 now: datetime | None = None, calendar: TradingCalendar | None = None) -> None:
         self.instrument = instrument
         self.max_spread_pips = to_decimal(max_spread_pips)
         self.now = now
+        self.calendar = calendar
 
     def assess(self, candle: Candle) -> CandleAssessment:
         hard: list[str] = []
@@ -43,8 +45,14 @@ class CandleValidator:
             hard.append("instrument_mismatch")
             reasons.append("شناسه نماد با مشخصات قراردادی سازگار نیست.")
 
-        if candle.open_time != floor_to_timeframe(candle.open_time, tf.value):
-            hard.append("misaligned_bar")
+        if self.calendar is not None:
+            aligned = self.calendar.is_aligned_bar(candle.open_time, tf)
+        else:
+            aligned = candle.open_time == floor_to_timeframe(candle.open_time, tf.value)
+        if not aligned:
+            # شبکهٔ روزانه/۴ساعته تابع نیمه‌شب سرور است و در هفته‌های اختلاف DST
+            # یک ساعت جابه‌جا می‌شود؛ برای این تایم‌فریم‌ها هشدار نرم است.
+            (soft if tf.minutes >= 240 else hard).append("misaligned_bar")
             reasons.append("زمان شروع کندل با شبکه زمانی هم‌تراز نیست.")
 
         prices = (candle.open, candle.high, candle.low, candle.close)

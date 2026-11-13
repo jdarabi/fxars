@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from enum import Enum
 
 from fxars.core.timeutil import TIMEFRAME_MINUTES, timeframe_delta
@@ -22,7 +23,7 @@ class Timeframe(str, Enum):
         return TIMEFRAME_MINUTES[self.value]
 
     @property
-    def delta(self):
+    def delta(self) -> timedelta:
         return timeframe_delta(self.value)
 
     @classmethod
@@ -118,6 +119,7 @@ class RiskReasonCode(str, Enum):
     APPROVED = "APPROVED"
     PHASE_NOT_ALLOWED = "PHASE_NOT_ALLOWED"
     KILL_SWITCH_ACTIVE = "KILL_SWITCH_ACTIVE"
+    RISK_LOCK_ACTIVE = "RISK_LOCK_ACTIVE"
     SCENARIO_INVALID = "SCENARIO_INVALID"
     SCENARIO_EXPIRED = "SCENARIO_EXPIRED"
     SIGNAL_TOO_WEAK = "SIGNAL_TOO_WEAK"
@@ -130,8 +132,12 @@ class RiskReasonCode(str, Enum):
     POSITION_SIZE_INVALID = "POSITION_SIZE_INVALID"
     RISK_PER_TRADE_EXCEEDED = "RISK_PER_TRADE_EXCEEDED"
     DAILY_LOSS_LIMIT = "DAILY_LOSS_LIMIT"
+    WEEKLY_LOSS_LIMIT = "WEEKLY_LOSS_LIMIT"
     DRAWDOWN_LIMIT = "DRAWDOWN_LIMIT"
+    MARKET_CLOSED = "MARKET_CLOSED"
     MAX_OPEN_TRADES = "MAX_OPEN_TRADES"
+    MAX_DAILY_TRADES = "MAX_DAILY_TRADES"
+    CONVERSION_RATE_MISSING = "CONVERSION_RATE_MISSING"
     SYMBOL_EXPOSURE_LIMIT = "SYMBOL_EXPOSURE_LIMIT"
     CURRENCY_EXPOSURE_LIMIT = "CURRENCY_EXPOSURE_LIMIT"
     CORRELATION_EXPOSURE_LIMIT = "CORRELATION_EXPOSURE_LIMIT"
@@ -157,6 +163,37 @@ class OrderStatus(str, Enum):
     RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
 
 
+class ApprovalStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+
+
+class RiskLockState(str, Enum):
+    """وضعیت چرخه قفل ریسک (بخش ۳-۳ سند تکمیلی ۱.۱).
+
+    NORMAL و WARNING اجازه ارسال می‌دهند؛ بقیه وضعیت‌ها ارسال سفارش را متوقف
+    می‌کنند تا بازبینی/آزادسازی رسمی ثبت شود.
+    """
+
+    NORMAL = "NORMAL"
+    WARNING = "WARNING"
+    LOCKED_DAILY = "LOCKED_DAILY"
+    LOCKED_WEEKLY = "LOCKED_WEEKLY"
+    KILL_SWITCH = "KILL_SWITCH"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+
+    @property
+    def blocks_orders(self) -> bool:
+        return self in {
+            RiskLockState.LOCKED_DAILY,
+            RiskLockState.LOCKED_WEEKLY,
+            RiskLockState.KILL_SWITCH,
+            RiskLockState.MANUAL_REVIEW,
+        }
+
+
 class Side(str, Enum):
     BUY = "BUY"
     SELL = "SELL"
@@ -173,7 +210,17 @@ class OrderType(str, Enum):
 
 
 class Phase(str, Enum):
+    """FIX-DUAL: فازهای سامانه.
+
+    ADVISOR: مشاور تریدر — هیچ سفارشی ارسال نمی‌شود.
+    READ_ONLY: فقط خواندن (میراث MVP-1).
+    PAPER: اجرای شبیه‌سازی.
+    DEMO: اجرای دمو روی بروکر دمو.
+    ASSISTED: اجرای دستی با تأیید اپراتور.
+    AUTOMATED_LIMITED: ربات با سقف سخت.
+    """
     READ_ONLY = "READ_ONLY"
+    ADVISOR = "ADVISOR"
     PAPER = "PAPER"
     DEMO = "DEMO"
     ASSISTED = "ASSISTED"
@@ -181,12 +228,20 @@ class Phase(str, Enum):
 
     @property
     def allows_order_intents(self) -> bool:
-        return self is not Phase.READ_ONLY
+        # FIX-DUAL: ADVISOR هرگز OrderIntent نمی‌سازد
+        return self in {Phase.PAPER, Phase.DEMO, Phase.ASSISTED, Phase.AUTOMATED_LIMITED}
 
     @property
     def allows_real_broker(self) -> bool:
         return self in {Phase.DEMO, Phase.ASSISTED, Phase.AUTOMATED_LIMITED}
 
+    @property
+    def is_advisor_mode(self) -> bool:
+        return self in {Phase.READ_ONLY, Phase.ADVISOR}
+
+    @property
+    def is_automation_mode(self) -> bool:
+        return self in {Phase.PAPER, Phase.DEMO, Phase.ASSISTED, Phase.AUTOMATED_LIMITED}
 
 class SessionName(str, Enum):
     SYDNEY = "SYDNEY"
@@ -227,7 +282,9 @@ class Permission(str, Enum):
     REPORT_READ = "report.read"
     AUDIT_READ = "audit.read"
     EXECUTION_ORDER = "execution.order"
+    EXECUTION_APPROVE = "execution.approve"
     USERS_ADMIN = "users.admin"
+    TENANT_ADMIN = "tenant.admin"
     KILLSWITCH_TOGGLE = "killswitch.toggle"
     SETTINGS_WRITE = "settings.write"
 

@@ -1,4 +1,4 @@
-"""End-to-end paper trading test with file-based database (P6-5)."""
+﻿"""End-to-end paper trading test with file-based database (P6-5)."""
 from __future__ import annotations
 
 import sys
@@ -168,7 +168,7 @@ class FilePersistenceTests(unittest.TestCase):
             clock = Clock(start)
             platform = Platform(
                 settings, db=Database(str(db_path)),
-                clock=clock, calendar=calendar,
+                clock=clock, calendar=calendar, sync_phase=False,
             )
             platform.bootstrap(create_users=False)
             instrument = platform.instruments.get("EURUSD")
@@ -212,6 +212,7 @@ class FilePersistenceTests(unittest.TestCase):
                 db=Database(str(db_path)),
                 clock=clock,
                 calendar=calendar,
+                sync_phase=False,
             )
             try:
                 reloaded = reopened.orders.get_intent(intent_id)

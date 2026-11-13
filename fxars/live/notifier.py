@@ -27,6 +27,16 @@ class TelegramConfig:
 
     @classmethod
     def from_env(cls):
+        # FIX-TELEGRAM-CONFIG: اول از فایل data/telegram.json، بعد env var
+        try:
+            from fxars.live.telegram_config import TelegramSettings
+            settings = TelegramSettings.load()
+            if settings.enabled and settings.token and settings.chat_id:
+                logger.info("telegram config loaded from data/telegram.json")
+                return cls(token=settings.token, chat_id=settings.chat_id)
+        except Exception as exc:
+            logger.warning("telegram_config load failed: %s", exc)
+        # fallback به env var
         token = os.environ.get("FXARS_TELEGRAM_TOKEN", "").strip()
         chat = os.environ.get("FXARS_TELEGRAM_CHAT_ID", "").strip()
         if not token or not chat:

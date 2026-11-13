@@ -126,7 +126,11 @@ class AnalysisContext:
         return self.candles[index].open_time + self.tf.delta * horizon
 
     def session_names(self) -> tuple[str, ...]:
-        return tuple(session.value for session in self.calendar.sessions_at(self.as_of))
+        return tuple(
+            session.value for session in self.calendar.sessions_at(
+                self.as_of, instrument_id=self.instrument.instrument_id,
+            )
+        )
 
     def events_for_currencies(self, currencies: set[str]) -> list[EconomicEvent]:
         return [event for event in self.economic_events if event.currency in currencies]

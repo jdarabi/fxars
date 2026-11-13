@@ -9,6 +9,7 @@ from decimal import Decimal
 from fxars.domain.enums import Direction, ScenarioStatus
 from fxars.domain.models import AccountSnapshot, Candle, EconomicEvent, PriceZone, Scenario
 from fxars.risk.gate import RiskContext, RiskGate
+from fxars.risk.service import RiskService
 from fxars.risk.sizing import SizingInput, calculate_position_size
 
 from tests.helpers import make_env
@@ -131,6 +132,30 @@ class GateTests(unittest.TestCase):
         self.assertTrue(decision.checks_failed == ())
         self.assertGreater(decision.valid_until, self.env.as_of)
 
+    def test_below_min_lot_detail_is_concrete(self) -> None:
+        account = make_account(self.env, balance="100", equity="100", free_margin="100", peak_equity="100")
+        decision = self.gate.evaluate(self.context(account=account))
+        self.assertFalse(decision.approved)
+        self.assertEqual(decision.reason_code.value, "POSITION_SIZE_INVALID")
+        self.assertIn("زیر حداقل", decision.reason_detail)
+        self.assertIn("0.01", decision.reason_detail)
+        self.assertIn("100", decision.reason_detail)
+
+    def test_stop_distance_detail_names_limit(self) -> None:
+        decision = self.gate.evaluate(self.context(scenario=make_scenario(
+            self.env, entry="1.0900", stop="1.0660",
+        )))
+        self.assertFalse(decision.approved)
+        self.assertEqual(decision.reason_code.value, "STOP_DISTANCE_INVALID")
+        self.assertIn("بیشتر از سقف", decision.reason_detail)
+        self.assertIn("150", decision.reason_detail)
+
+    def test_max_open_trades_detail_names_counts(self) -> None:
+        decision = self.gate.evaluate(self.context(account=make_account(self.env, open_positions=3)))
+        self.assertFalse(decision.approved)
+        self.assertEqual(decision.reason_code.value, "MAX_OPEN_TRADES")
+        self.assertIn("از سقف 3", decision.reason_detail)
+
     def test_missing_account_rejected(self) -> None:
         decision = self.gate.evaluate(self.context(account=None))
         self.assertFalse(decision.approved)
@@ -199,6 +224,94 @@ class GateTests(unittest.TestCase):
         scenario = make_scenario(self.env, expiry_hours=1)
         decision = self.gate.evaluate(self.context(scenario=scenario, now=self.env.as_of + timedelta(hours=2)))
         self.assertIn("scenario_valid", decision.checks_failed)
+
+    def test_missing_conversion_rate_rejected(self) -> None:
+        instrument = self.env.platform.instruments.get("USDJPY")
+        scenario = Scenario(
+            scenario_id="sc_jpy", instrument_id="USDJPY", timeframe="H1", direction=Direction.LONG,
+            status=ScenarioStatus.WATCH,
+            entry_condition={"type": "price_cross_above", "level": "150.00", "timeframe": "H1"},
+            entry_zone=PriceZone(Decimal("149.98"), Decimal("150.02")),
+            invalidation_condition={"type": "close_below", "level": "149.50", "timeframe": "H1"},
+            stop_logic={"type": "structure_low", "level": "149.50", "buffer_pips": 5},
+            target_logic=({"type": "rr_multiple", "value": 1.5, "price": "150.75"},),
+            expiry_at=self.env.as_of + timedelta(hours=8),
+            evidence_ids=("ev_1",), analysis_run_id="ar_test", decision_explanation="test",
+            created_at=self.env.as_of, updated_at=self.env.as_of, rules_version="v1",
+            config_hash="hash", strength=0.6,
+        )
+        candle = Candle(
+            instrument_id="USDJPY", source_id="test", timeframe="H1",
+            open_time=self.env.as_of - timedelta(hours=1), open="149.90", high="150.10", low="149.80",
+            close="150.00", spread=Decimal("0.010"), is_closed=True,
+            ingested_at=self.env.as_of, available_at=self.env.as_of,
+        )
+        decision = self.gate.evaluate(self.context(
+            scenario=scenario, instrument=instrument, candle=candle,
+            instruments={"USDJPY": instrument}, rates={},
+        ))
+        self.assertFalse(decision.approved)
+        self.assertIn("conversion_rates_available", decision.checks_failed)
+
+    def test_present_conversion_rate_allows_sizing(self) -> None:
+        instrument = self.env.platform.instruments.get("USDJPY")
+        scenario = Scenario(
+            scenario_id="sc_jpy", instrument_id="USDJPY", timeframe="H1", direction=Direction.LONG,
+            status=ScenarioStatus.WATCH,
+            entry_condition={"type": "price_cross_above", "level": "150.00", "timeframe": "H1"},
+            entry_zone=PriceZone(Decimal("149.98"), Decimal("150.02")),
+            invalidation_condition={"type": "close_below", "level": "149.50", "timeframe": "H1"},
+            stop_logic={"type": "structure_low", "level": "149.50", "buffer_pips": 5},
+            target_logic=({"type": "rr_multiple", "value": 1.5, "price": "150.75"},),
+            expiry_at=self.env.as_of + timedelta(hours=8),
+            evidence_ids=("ev_1",), analysis_run_id="ar_test", decision_explanation="test",
+            created_at=self.env.as_of, updated_at=self.env.as_of, rules_version="v1",
+            config_hash="hash", strength=0.6,
+        )
+        candle = Candle(
+            instrument_id="USDJPY", source_id="test", timeframe="H1",
+            open_time=self.env.as_of - timedelta(hours=1), open="149.90", high="150.10", low="149.80",
+            close="150.00", spread=Decimal("0.010"), is_closed=True,
+            ingested_at=self.env.as_of, available_at=self.env.as_of,
+        )
+        decision = self.gate.evaluate(self.context(
+            scenario=scenario, instrument=instrument, candle=candle,
+            instruments={"USDJPY": instrument}, rates={"JPY": Decimal("0.0067")},
+        ))
+        self.assertTrue(decision.approved, decision.reason_detail)
+        self.assertGreater(decision.position_size, Decimal("0"))
+
+    def test_daily_trade_cap(self) -> None:
+        decision = self.gate.evaluate(
+            self.context(trades_today=self.env.settings.risk.max_daily_trades),
+        )
+        self.assertIn("daily_trade_count_ok", decision.checks_failed)
+
+
+class RiskServicePeakTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.env = make_env(bars=100)
+
+    def tearDown(self) -> None:
+        self.env.close()
+
+    def _service_with_previous(self, previous):
+        service = RiskService.__new__(RiskService)
+        service.accounts = type("_Accounts", (), {
+            "latest": lambda self, account_id: previous,
+        })()
+        return service
+
+    def test_peak_equity_is_preserved(self) -> None:
+        previous = make_account(self.env, equity="12000", peak_equity="12000")
+        snapshot = make_account(self.env, equity="9000", peak_equity="9000")
+        result = self._service_with_previous(previous)._with_persisted_peak(snapshot)
+        self.assertEqual(result.peak_equity, Decimal("12000"))
+
+    def test_no_previous_keeps_snapshot(self) -> None:
+        snapshot = make_account(self.env, equity="9000", peak_equity="9500")
+        result = self._service_with_previous(None)._with_persisted_peak(snapshot)
+        self.assertEqual(result.peak_equity, Decimal("9500"))
 
 
 class KillSwitchTests(unittest.TestCase):

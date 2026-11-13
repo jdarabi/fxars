@@ -53,7 +53,22 @@ class ReconciliationService:
         *,
         actor: str = "system",
     ) -> ReconciliationResult | None:
-        broker_order = self.broker.query(intent.client_order_id)
+        broker_order = None
+        fills: list = []
+        if self.broker is not None:
+            query_intent = getattr(self.broker, "query_intent", None)
+            if callable(query_intent):
+                details = query_intent(intent)
+                if details is not None:
+                    broker_order, fills = details
+            if broker_order is None:
+                query_details = getattr(self.broker, "query_details", None)
+                if callable(query_details):
+                    details = query_details(intent.client_order_id)
+                    if details is not None:
+                        broker_order, fills = details
+                elif hasattr(self.broker, "query"):
+                    broker_order = self.broker.query(intent.client_order_id)
         now = self.clock()
 
         if broker_order is None:
@@ -86,11 +101,19 @@ class ReconciliationService:
         elif target == OrderStatus.CANCELED:
             updated = transition(updated, OrderStatus.CANCELED)
 
-        self.orders.save_intent(updated)
-        self.audit.append(
-            "RECONCILIATION_COMPLETED", "order_intent", intent.intent_id, actor=actor,
-            payload={"broker_status": target.value, "final_status": updated.status.value},
-        )
+        with self.orders.db.transaction():
+            self.orders.save_broker_order(broker_order)
+            for fill in fills:
+                self.orders.save_fill(fill)
+            self.orders.save_intent(updated)
+            self.audit.append(
+                "RECONCILIATION_COMPLETED", "order_intent", intent.intent_id, actor=actor,
+                payload={
+                    "broker_status": target.value,
+                    "final_status": updated.status.value,
+                    "fills": len(fills),
+                },
+            )
         return ReconciliationResult(
             intent_id=intent.intent_id,
             from_status=OrderStatus.UNKNOWN,

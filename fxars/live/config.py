@@ -62,11 +62,13 @@ class LiveConfig:
     max_signals_per_hour: int = 3
     history_bars: int = 500
     source_id: str = "mt5"
+    min_score_threshold: float = 0.35
+    execute_orders: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> LiveConfig:
-        instruments = list(data.get('instruments') or [data.get('instrument', 'EURUSD')])
         data = data or {}
+        instruments = list(data.get('instruments') or [data.get('instrument', 'EURUSD')])
         return cls(
             instrument=str(data.get("instrument", "EURUSD")),
             instruments=instruments,
@@ -78,6 +80,8 @@ class LiveConfig:
             max_signals_per_hour=int(data.get("max_signals_per_hour", 3)),
             history_bars=int(data.get("history_bars", 500)),
             source_id=str(data.get("source_id", "mt5")),
+            min_score_threshold=float(data.get("min_score_threshold", 0.35)),
+            execute_orders=bool(data.get("execute_orders", False)),
         )
 
     @classmethod
@@ -101,4 +105,6 @@ class LiveConfig:
             "max_signals_per_hour": self.max_signals_per_hour,
             "history_bars": self.history_bars,
             "source_id": self.source_id,
+            "min_score_threshold": self.min_score_threshold,
+            "execute_orders": self.execute_orders,
         }

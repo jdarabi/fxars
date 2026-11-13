@@ -12,6 +12,10 @@ from typing import Any
 
 from fxars.core.timeutil import format_ts
 from fxars.domain.models import Candle
+from fxars.live.mt5_connection import MT5ConnectionError
+from fxars.live.mt5_connection import acquire as acquire_mt5
+from fxars.live.mt5_connection import release as release_mt5
+from fxars.live.mt5_feed import detect_broker_offset, resolve_broker_timezone, server_time_to_utc
 
 logger = logging.getLogger("fxars.live.history")
 
@@ -45,6 +49,8 @@ def download_from_mt5(
     if tf_key is None:
         raise ValueError(f"unsupported timeframe: {timeframe}")
     tf_const = getattr(mt5, tf_key)
+    broker_offset = detect_broker_offset(mt5)
+    broker_tz = resolve_broker_timezone(broker_offset)
 
     if start is not None and end is not None:
         # Range fetch
@@ -66,7 +72,9 @@ def download_from_mt5(
 
     candles: list[Candle] = []
     for r in rates:
-        open_time = datetime.fromtimestamp(int(r["time"]), tz=UTC)
+        open_time = server_time_to_utc(
+            int(r["time"]), tz=broker_tz, fallback_offset=broker_offset,
+        )
         candles.append(Candle(
             instrument_id=symbol,
             source_id="mt5",
@@ -132,12 +140,9 @@ def download_history(
     result: dict[str, Any] = {"files": [], "total": 0, "errors": []}
 
     try:
-        import MetaTrader5 as mt5
-        if not mt5.initialize():
-            code, msg = mt5.last_error()
-            raise RuntimeError(f"MT5 initialize failed: ({code}) {msg}")
-    except ImportError as exc:
-        raise RuntimeError("MetaTrader5 package not installed (pip install MetaTrader5)") from exc
+        mt5 = acquire_mt5()
+    except MT5ConnectionError as exc:
+        raise RuntimeError(str(exc)) from exc
 
     try:
         for symbol in symbols:
@@ -179,10 +184,7 @@ def download_history(
                     result["errors"].append(f"{symbol}/{tf}: {exc}")
                     print(f"    ERROR: {exc}", file=sys.stderr)
     finally:
-        try:
-            mt5.shutdown()
-        except Exception:
-            pass
+        release_mt5()
 
     return result
 

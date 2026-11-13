@@ -6,7 +6,7 @@ import json
 import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -100,6 +100,8 @@ class ApiApp:
             self.routes.append((method, re.compile(pattern), handler, permission, public))
 
         add("GET", r"^/api/v1/health$", self._health, public=True)
+        add("GET", r"^/api/v1/phase$", self._phase_get, Permission.DATA_READ)
+        add("POST", r"^/api/v1/phase$", self._phase_set, Permission.SETTINGS_WRITE)
         add("GET", r"^/api/v1/debug/rate-status$", self._rate_status, public=True)
         add("GET", r"^/api/v1/health/live$", self._health_live, public=True)
         add("GET", r"^/api/v1/health/ready$", self._health_ready, public=True)
@@ -110,6 +112,16 @@ class ApiApp:
         add("GET", r"^/api/v1/auth/demo-totp$", self._demo_totp, public=True)
         add("POST", r"^/api/v1/auth/logout$", self._logout)
         add("GET", r"^/api/v1/auth/me$", self._me)
+        add("GET", r"^/api/v1/tenant$", self._tenant_get, Permission.DATA_READ)
+        add("GET", r"^/api/v1/tenant/export$", self._tenant_export, Permission.DATA_READ)
+        add("GET", r"^/api/v1/tenant/retention$", self._tenant_retention, Permission.DATA_READ)
+        add("GET", r"^/api/v1/tenants$", self._tenants, Permission.TENANT_ADMIN)
+        add("GET", r"^/api/v1/tenants/(?P<tenant_id>[A-Za-z0-9_.\-]+)/export$", self._tenant_export,
+            Permission.TENANT_ADMIN)
+        add("GET", r"^/api/v1/tenants/(?P<tenant_id>[A-Za-z0-9_.\-]+)/retention$", self._tenant_retention,
+            Permission.TENANT_ADMIN)
+        add("POST", r"^/api/v1/tenants/(?P<tenant_id>[A-Za-z0-9_.\-]+)$", self._tenant_update,
+            Permission.TENANT_ADMIN)
         add("GET", r"^/api/v1/meta$", self._meta, Permission.DATA_READ)
         add("GET", r"^/api/v1/instruments$", self._instruments, Permission.DATA_READ)
         add("GET", r"^/api/v1/market-data/candles$", self._candles, Permission.DATA_READ)
@@ -135,6 +147,38 @@ class ApiApp:
         add("POST", r"^/api/v1/killswitch$", self._killswitch_set, Permission.KILLSWITCH_TOGGLE)
         add("GET", r"^/api/v1/live/chart$", self._live_chart, Permission.DATA_READ)
         add("GET", r"^/api/v1/live/signals$", self._live_signals, Permission.SCENARIO_READ)
+        # FIX-TELEGRAM-CONFIG
+        add("GET", r"^/api/v1/settings/telegram$", self._telegram_get, Permission.SCENARIO_READ)
+        add("POST", r"^/api/v1/settings/telegram$", self._telegram_set, Permission.KILLSWITCH_TOGGLE)
+        add("POST", r"^/api/v1/settings/telegram/test$", self._telegram_test, Permission.KILLSWITCH_TOGGLE)
+        add("POST", r"^/api/v1/settings/desktop/test$", self._desktop_test, Permission.KILLSWITCH_TOGGLE)
+
+        # SUPPLEMENT-1.1: قابلیت‌های اطلاعاتی تصمیم و حاکمیت
+        add("GET", r"^/api/v1/intelligence/journal$", self._journal_list, Permission.SCENARIO_READ)
+        add("POST", r"^/api/v1/intelligence/journal$", self._journal_add, Permission.SCENARIO_TRANSITION)
+        add("GET", r"^/api/v1/intelligence/heatmap$", self._heatmap, Permission.SCENARIO_READ)
+        add("GET", r"^/api/v1/intelligence/premortem/(?P<run_id>[A-Za-z0-9_\-]+)$",
+            self._premortem, Permission.SCENARIO_READ)
+        add("GET", r"^/api/v1/intelligence/counterfactual/(?P<scenario_id>[A-Za-z0-9_\-]+)$",
+            self._counterfactual, Permission.SCENARIO_READ)
+        add("GET", r"^/api/v1/intelligence/challenges/(?P<scenario_id>[A-Za-z0-9_\-]+)$",
+            self._challenges_list, Permission.SCENARIO_READ)
+        add("POST", r"^/api/v1/intelligence/challenges/(?P<scenario_id>[A-Za-z0-9_\-]+)$",
+            self._challenge_add, Permission.SCENARIO_TRANSITION)
+        add("GET", r"^/api/v1/governance/provenance/(?P<run_id>[A-Za-z0-9_\-]+)$",
+            self._provenance_run, Permission.AUDIT_READ)
+        add("GET", r"^/api/v1/governance/policies$", self._policies, Permission.AUDIT_READ)
+        add("POST", r"^/api/v1/governance/policies$", self._policy_write, Permission.RISK_POLICY_WRITE)
+        add("GET", r"^/api/v1/governance/models$", self._models, Permission.AUDIT_READ)
+        add("POST", r"^/api/v1/governance/models$", self._model_write, Permission.RISK_POLICY_WRITE)
+        add("GET", r"^/api/v1/governance/acceptance/(?P<run_id>[A-Za-z0-9_\-]+)$",
+            self._acceptance, Permission.REPORT_READ)
+        add("GET", r"^/api/v1/risk/lock$", self._risk_lock_get, Permission.SCENARIO_READ)
+        add("POST", r"^/api/v1/risk/lock$", self._risk_lock_set, Permission.RISK_EVALUATE)
+
+        # FIX-21-TRADING-HISTORY: مسیرهای معاملات و دانلود
+        from fxars.api.trading import register_trading_routes
+        register_trading_routes(self)
 
     def handle(self, request: ApiRequest) -> ApiResponse:
         correlation = request.headers.get("x-correlation-id") or None
@@ -352,7 +396,8 @@ class ApiApp:
         # Active scenarios for this instrument/timeframe
         scenarios_out = []
         try:
-            live = self.platform.scenarios.list(instrument_id=instrument_id, limit=20)
+            live = self.platform.scenarios.list(instrument_id=instrument_id, limit=20,
+                                                tenant_id=user.tenant_id)
             for s in live:
                 if s.timeframe != timeframe:
                     continue
@@ -398,7 +443,7 @@ class ApiApp:
 
         items = []
         try:
-            scenarios = self.platform.scenarios.list(limit=limit * 2)
+            scenarios = self.platform.scenarios.list(limit=limit * 2, tenant_id=user.tenant_id)
             for s in scenarios:
                 if s.status.value not in ("WATCH", "ARMED", "TRIGGERED", "DRAFT"):
                     continue
@@ -422,6 +467,64 @@ class ApiApp:
 
         return self._json(200, {"items": items, "count": len(items)})
 
+
+    # ---------------------------------------------------------- FIX-DUAL-PHASE
+    def _phase_get(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        """خواندن فاز فعلی و تنظیمات هر دو حالت."""
+        return self._json(200, {
+            "settings": self.platform.phase_settings.to_dict(),
+            "runtime_phase": self.settings.phase.value,
+            "execution_enabled": self.settings.execution_enabled,
+            "broker": getattr(self.platform.execution.broker, "name", None),
+        })
+
+    def _phase_set(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        """تغییر فاز فعلی و اعمال فوری آن روی settings/services/broker. فقط ADMIN/RISK_MANAGER."""
+        body = request.json()
+        mode = str(body.get("mode", "")).upper()
+        allowed = ["ADVISOR", "AUTOMATED_LIMITED", "READ_ONLY", "PAPER", "DEMO", "ASSISTED"]
+        if mode not in allowed:
+            raise ValidationError("mode نامعتبر است.", details={"allowed": allowed})
+        automated_enabled: bool | None = None
+        if mode == "AUTOMATED_LIMITED":
+            confirm = str(body.get("robot_confirm", "")).strip()
+            if confirm != "ENABLE ROBOT":
+                raise ValidationError(
+                    "برای فعال‌سازی ربات، فیلد robot_confirm باید دقیقاً ENABLE ROBOT باشد.",
+                    details={"hint": "این یک تأیید امنیتی است"},
+                )
+            automated_enabled = True
+        try:
+            outcome = self.platform.apply_phase(mode, automated_enabled=automated_enabled)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from None
+        self.settings = self.platform.settings
+        warning: str | None = None
+        if (
+            outcome["runtime_phase"] in ("DEMO", "ASSISTED", "AUTOMATED_LIMITED")
+            and outcome["broker"] != "mt5"
+        ):
+            warning = (
+                "فاز اعمال شد اما اتصال MT5 برقرار نیست؛ تا اتصال دمو، "
+                "سفارش‌ها با REAL_BROKER_UNAVAILABLE مسدود می‌شوند."
+            )
+        self.platform.audit.append(
+            "PHASE_CHANGED", "system", "phase", actor=user.username,
+            payload={
+                "from": outcome["previous_phase"],
+                "to": outcome["runtime_phase"],
+                "mode": outcome["requested_mode"],
+                "broker": outcome["broker"],
+            },
+        )
+        return self._json(200, {
+            "mode": outcome["requested_mode"],
+            "runtime_phase": outcome["runtime_phase"],
+            "execution_enabled": outcome["execution_enabled"],
+            "broker": outcome["broker"],
+            "warning": warning,
+            "note": "فاز در همین اجرا اعمال شد.",
+        })
 
     def _health(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         db_ok = self.platform.db.query_one("SELECT 1 AS ok") is not None
@@ -535,6 +638,76 @@ class ApiApp:
             "permissions": sorted(permission.value for permission in permissions_for(user.role)),
         })
 
+    # ------------------------------------------------------------------ مستاجر و اشتراک
+    def _tenant_get(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        return self._json(200, self.platform.quota.snapshot(user.tenant_id))
+
+    def _tenants(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        items = []
+        for tenant in self.platform.tenants.list():
+            snapshot = self.platform.quota.snapshot(tenant.tenant_id)
+            items.append(snapshot)
+        return self._json(200, {"items": items, "count": len(items)})
+
+    def _tenant_export(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        tenant_id = params.get("tenant_id") or user.tenant_id
+        self.platform.quota.tenant(tenant_id)
+        limit = request.integer("limit", 1000, minimum=1, maximum=5000)
+        return self._json(200, self.platform.data_rights.export(tenant_id, limit=limit))
+
+    def _tenant_retention(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        tenant_id = params.get("tenant_id") or user.tenant_id
+        self.platform.quota.tenant(tenant_id)
+        return self._json(200, self.platform.data_rights.retention_report(tenant_id))
+
+    def _tenant_update(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        from fxars.audit.audit import AuditAction
+        from fxars.tenancy.plans import PLANS
+
+        tenant = self.platform.tenants.get(params["tenant_id"])
+        if tenant is None:
+            raise NotFoundError(f"مستاجر {params['tenant_id']} یافت نشد.")
+        body = request.json()
+        changes: dict[str, Any] = {}
+
+        if "plan" in body:
+            plan = str(body["plan"])
+            if plan not in PLANS:
+                raise ValidationError(
+                    f"پلن {plan} شناخته نشده است.", details={"allowed": sorted(PLANS)}
+                )
+            changes["plan"] = plan
+        if "active" in body:
+            changes["active"] = bool(body["active"])
+        if "quota_overrides" in body:
+            raw = body["quota_overrides"]
+            if not isinstance(raw, dict):
+                raise ValidationError("quota_overrides باید شیء باشد.")
+            from fxars.tenancy.plans import QUOTA_KEYS
+
+            overrides: dict[str, int] = {}
+            for key, value in raw.items():
+                if key not in QUOTA_KEYS:
+                    raise ValidationError(f"کلید سهمیه {key} شناخته نشده است.", details={"allowed": list(QUOTA_KEYS)})
+                try:
+                    number = int(value)
+                except (TypeError, ValueError):
+                    raise ValidationError(f"مقدار سهمیه {key} باید عدد صحیح باشد.") from None
+                if number < -1:
+                    raise ValidationError(f"مقدار سهمیه {key} نمی‌تواند کمتر از -۱ باشد.")
+                overrides[key] = number
+            changes["quota_overrides"] = overrides
+        if not changes:
+            raise ValidationError("حداقل یکی از plan/active/quota_overrides لازم است.")
+
+        updated = replace(tenant, **changes)
+        self.platform.tenants.save(updated)
+        self.platform.audit.append(
+            AuditAction.CONFIG_CHANGED, "tenant", tenant.tenant_id, actor=user.username,
+            payload={"changes": {key: jsonable(value) for key, value in changes.items()}},
+        )
+        return self._json(200, self.platform.quota.snapshot(tenant.tenant_id))
+
     def _meta(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         from fxars.analysis.modules import module_specs
         from fxars.version import CODE_VERSION, CONTRACT_VERSION, DOCUMENT_ID, RULES_VERSION
@@ -624,7 +797,10 @@ class ApiApp:
 
     def _analysis_list(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         limit, offset = self._page(request)
-        runs = self.platform.analyses.list_runs(instrument_id=request.one("instrument_id"), limit=limit, offset=offset)
+        runs = self.platform.analyses.list_runs(
+            instrument_id=request.one("instrument_id"), limit=limit, offset=offset,
+            tenant_id=user.tenant_id,
+        )
         return self._json(200, {"items": [run.to_dict() for run in runs], "count": len(runs)})
 
     def _analysis_create(self, request: ApiRequest, params: dict, user) -> ApiResponse:
@@ -647,7 +823,8 @@ class ApiApp:
                 as_of = parse_ts(body["as_of"])
             except ValueError as exc:
                 raise ValidationError(f"as_of نامعتبر است: {exc}") from None
-        result = self.platform.run_analysis(instrument_id, timeframe, as_of=as_of, actor=user.username)
+        result = self.platform.run_analysis(instrument_id, timeframe, as_of=as_of,
+                                            actor=user.username, tenant_id=user.tenant_id)
         return self._json(200, {
             "run": result.run.to_dict(),
             "decision": result.decision.to_dict(),
@@ -657,9 +834,9 @@ class ApiApp:
         })
 
     def _analysis_get(self, request: ApiRequest, params: dict, user) -> ApiResponse:
-        run = self.platform.analyses.get_run(params["run_id"])
+        run = self.platform.analyses.get_run_for_tenant(params["run_id"], user.tenant_id)
         evidences = self.platform.analyses.evidence_for(run.run_id)
-        scenario = self.platform.scenarios.find_by_run(run.run_id)
+        scenario = self.platform.scenarios.find_by_run(run.run_id, tenant_id=user.tenant_id)
         return self._json(200, {
             "run": run.to_dict(),
             "evidences": [evidence.to_dict() for evidence in evidences],
@@ -672,12 +849,13 @@ class ApiApp:
         scenarios = self.platform.scenarios.list(
             status=ScenarioStatus(status) if status else None,
             instrument_id=request.one("instrument_id"), limit=limit, offset=offset,
+            tenant_id=user.tenant_id,
         )
         return self._json(200, {"items": [scenario.to_dict() for scenario in scenarios], "count": len(scenarios),
-                                 "summary": self.platform.scenarios.count_by_status()})
+                                 "summary": self.platform.scenarios.count_by_status(tenant_id=user.tenant_id)})
 
     def _scenario_get(self, request: ApiRequest, params: dict, user) -> ApiResponse:
-        scenario = self.platform.scenarios.get(params["scenario_id"])
+        scenario = self.platform.scenarios.get_for_tenant(params["scenario_id"], user.tenant_id)
         transitions = self.platform.scenarios.transitions(scenario.scenario_id)
         decision = self.platform.decisions.latest_for_scenario(scenario.scenario_id)
         return self._json(200, {
@@ -687,6 +865,7 @@ class ApiApp:
         })
 
     def _scenario_evaluate(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        self.platform.scenarios.get_for_tenant(params["scenario_id"], user.tenant_id)
         result = self.platform.evaluate_scenario(params["scenario_id"])
         return self._json(200, {
             "scenario": result.scenario.to_dict(),
@@ -704,6 +883,7 @@ class ApiApp:
             target = ScenarioStatus(str(status).upper())
         except ValueError:
             raise ValidationError("status نامعتبر است.") from None
+        self.platform.scenarios.get_for_tenant(params["scenario_id"], user.tenant_id)
         result = self.platform.scenario_service.transition(
             params["scenario_id"], target, actor=user.username, reason=reason, now=self.platform.clock(),
         )
@@ -714,11 +894,11 @@ class ApiApp:
 
     def _risk_list(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         limit, offset = self._page(request)
-        decisions = self.platform.decisions.list(limit=limit, offset=offset)
+        decisions = self.platform.decisions.list(limit=limit, offset=offset, tenant_id=user.tenant_id)
         return self._json(200, {"items": [decision.to_dict() for decision in decisions], "count": len(decisions)})
 
     def _risk_get(self, request: ApiRequest, params: dict, user) -> ApiResponse:
-        decision = self.platform.decisions.get(params["decision_id"])
+        decision = self.platform.decisions.get_for_tenant(params["decision_id"], user.tenant_id)
         return self._json(200, {"decision": decision.to_dict()})
 
     def _risk_evaluate(self, request: ApiRequest, params: dict, user) -> ApiResponse:
@@ -728,6 +908,7 @@ class ApiApp:
             raise ValidationError("scenario_id الزامی است.")
         decision = self.platform.evaluate_risk(
             str(scenario_id), body.get("account"), rates=body.get("rates"), actor=user.username,
+            tenant_id=user.tenant_id,
         )
         return self._json(200, {"decision": decision.to_dict()})
 
@@ -811,15 +992,236 @@ class ApiApp:
         })
 
     def _killswitch_get(self, request: ApiRequest, params: dict, user) -> ApiResponse:
-        return self._json(200, {"killswitch": self.platform.killswitch.status()})
+        scope = (request.one("scope") or "SYSTEM").upper()
+        target = request.one("target") or ""
+        return self._json(200, {
+            "killswitch": self.platform.killswitch.status(scope, target),
+            "scopes": self.platform.kill_switch_scopes(),
+        })
 
     def _killswitch_set(self, request: ApiRequest, params: dict, user) -> ApiResponse:
         body = request.json()
         reason = str(body.get("reason", "")).strip()
         if "active" not in body:
             raise ValidationError("فیلد active الزامی است.")
-        status = self.platform.set_kill_switch(bool(body["active"]), actor=user.username, reason=reason)
+        status = self.platform.set_kill_switch(
+            bool(body["active"]), actor=user.username, reason=reason,
+            scope=str(body.get("scope", "SYSTEM")).upper(), target=str(body.get("target", "")),
+        )
         return self._json(200, {"killswitch": status})
+
+    # ---------------------------------------------------------- SUPPLEMENT-1.1
+    def _journal_list(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        items = self.platform.intelligence.journal_list(
+            tenant_id=user.tenant_id,
+            analysis_run_id=request.one("analysis_run_id") or request.one("run_id"),
+            scenario_id=request.one("scenario_id"),
+            limit=request.integer("limit", 100, maximum=500),
+        )
+        return self._json(200, {"items": items, "count": len(items)})
+
+    def _journal_add(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        body = request.json()
+        entry = self.platform.intelligence.journal_add(
+            kind=str(body.get("kind", "NOTE")), body=str(body.get("body", "")),
+            actor=user.username, tenant_id=user.tenant_id,
+            analysis_run_id=body.get("analysis_run_id"), scenario_id=body.get("scenario_id"),
+            decision_id=body.get("decision_id"),
+            payload=body.get("payload") if isinstance(body.get("payload"), dict) else None,
+        )
+        return self._json(201, {"entry": entry})
+
+    def _heatmap(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        return self._json(200, self.platform.intelligence.heatmap(tenant_id=user.tenant_id))
+
+    def _premortem(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        run = self.platform.analyses.get_run_for_tenant(params["run_id"], user.tenant_id)
+        return self._json(200, self.platform.intelligence.premortem(run.run_id))
+
+    def _counterfactual(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        self.platform.scenarios.get_for_tenant(params["scenario_id"], user.tenant_id)
+        max_bars = request.integer("max_bars", self.settings.backtest.max_bars_in_trade, maximum=500)
+        return self._json(200, self.platform.intelligence.counterfactual(
+            params["scenario_id"], max_bars=max_bars,
+        ))
+
+    def _challenges_list(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        self.platform.scenarios.get_for_tenant(params["scenario_id"], user.tenant_id)
+        items = self.platform.intelligence.challenge_list(
+            params["scenario_id"], limit=request.integer("limit", 100, maximum=500),
+        )
+        return self._json(200, {"items": items, "count": len(items)})
+
+    def _challenge_add(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        body = request.json()
+        challenge = self.platform.intelligence.challenge_add(
+            params["scenario_id"], thesis=str(body.get("thesis", "")), actor=user.username,
+            evidence=body.get("evidence") if isinstance(body.get("evidence"), list) else None,
+            severity=str(body.get("severity", "MEDIUM")), tenant_id=user.tenant_id,
+        )
+        return self._json(201, {"challenge": challenge})
+
+    def _provenance_run(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        run = self.platform.analyses.get_run_for_tenant(params["run_id"], user.tenant_id)
+        records = self.platform.provenance_store.for_run(run.run_id, tenant_id=user.tenant_id)
+        chain = self.platform.provenance_store.verify_chain(tenant_id=user.tenant_id)
+        return self._json(200, {
+            "run_id": run.run_id,
+            "records": [record.to_dict() for record in records],
+            "count": len(records),
+            "chain": chain,
+        })
+
+    def _policies(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        kind = request.one("kind")
+        items = self.platform.policy_registry.list(kind=kind.lower() if kind else None,
+                                                  limit=request.integer("limit", 100, maximum=500))
+        return self._json(200, {"items": [item.to_dict() for item in items], "count": len(items)})
+
+    def _policy_write(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        body = request.json()
+        action = str(body.get("action", "register")).strip().lower()
+        if action == "activate":
+            record = self.platform.policy_registry.activate(
+                str(body.get("version", "")), kind=str(body.get("kind", "")).lower(),
+                actor=user.username, approved_by=str(body.get("approved_by", "")),
+                reason=str(body.get("reason", "")),
+            )
+        else:
+            record = self.platform.policy_registry.register(
+                str(body.get("kind", "")), body.get("values") or {},
+                actor=user.username, version=body.get("version"),
+                approved_by=str(body.get("approved_by", "")), notes=str(body.get("notes", "")),
+                activate=bool(body.get("activate", False)),
+            )
+        return self._json(201, {"policy": record.to_dict()})
+
+    def _models(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        items = self.platform.model_registry.list()
+        return self._json(200, {"items": [card.to_dict() for card in items], "count": len(items)})
+
+    def _model_write(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        from fxars.governance.models import ModelCard
+
+        body = request.json()
+        action = str(body.get("action", "register")).strip().lower()
+        if action == "promote":
+            card = self.platform.model_registry.promote(
+                str(body.get("model_id", "")), str(body.get("version", "")),
+                str(body.get("target", "")), actor=user.username,
+                approved_by=str(body.get("approved_by", "")), reason=str(body.get("reason", "")),
+                shadow_completed=body.get("shadow_completed"),
+                oos_passed=body.get("oos_passed"),
+                independent_approval=body.get("independent_approval"),
+                kill_switch_ready=body.get("kill_switch_ready"),
+            )
+        else:
+            card = self.platform.model_registry.register(
+                ModelCard(
+                    model_id=str(body.get("model_id", "")),
+                    version=str(body.get("version", "")),
+                    tier=int(body.get("tier", 0)),
+                    purpose=str(body.get("purpose", "")),
+                    owner=str(body.get("owner", "")),
+                    training_data=str(body.get("training_data", "")),
+                    feature_schema=str(body.get("feature_schema", "")),
+                    limitations=tuple(body.get("limitations", ()) or ()),
+                    metrics=body.get("metrics") or {},
+                    calibration=body.get("calibration") or {},
+                    provides_probability=bool(body.get("provides_probability", False)),
+                    dataset_snapshot=str(body.get("dataset_snapshot", "")),
+                    code_hash=str(body.get("code_hash", "")),
+                    config_hash=str(body.get("config_hash", "")),
+                    valid_from=parse_ts(body["valid_from"]) if body.get("valid_from") else None,
+                    valid_until=parse_ts(body["valid_until"]) if body.get("valid_until") else None,
+                ),
+                actor=user.username,
+            )
+        return self._json(201, {"model": card.to_dict()})
+
+    def _acceptance(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        from fxars.research.acceptance import evaluate_run
+
+        run = self.platform.backtests.get(params["run_id"])
+        report = evaluate_run(run, policy=self.settings.decision.acceptance)
+        return self._json(200, report.to_dict())
+
+    def _risk_lock_get(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        return self._json(200, {"risk_lock": self.platform.risk_lock_status()})
+
+    def _risk_lock_set(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        body = request.json()
+        result = self.platform.set_risk_lock_review(
+            actor=user.username, reason=str(body.get("reason", "")),
+            release=bool(body.get("release", False)),
+        )
+        return self._json(200, {"risk_lock": result})
+
+
+    # ---------------------------------------------------------- FIX-TELEGRAM-CONFIG
+    def _telegram_get(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        from fxars.live.telegram_config import TelegramSettings
+        settings = TelegramSettings.load()
+        return self._json(200, {"settings": settings.masked()})
+
+    def _telegram_set(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        from fxars.live.telegram_config import TelegramSettings
+        body = request.json()
+        token = str(body.get("token", "")).strip()
+        chat_id = str(body.get("chat_id", "")).strip()
+        enabled = bool(body.get("enabled", False))
+        if enabled and not chat_id:
+            raise ValidationError("برای فعال‌سازی، chat_id الزامی است.")
+        settings = TelegramSettings.load()
+        if token:
+            settings.token = token
+        if chat_id:
+            settings.chat_id = chat_id
+        settings.enabled = enabled
+        if enabled and (not settings.token or not settings.chat_id):
+            raise ValidationError("برای فعال‌سازی، token و chat_id الزامی است.")
+        settings.save()
+        try:
+            self.platform.audit.append(
+                "TELEGRAM_CONFIG_CHANGED", "system", "telegram",
+                actor=user.username,
+                payload={"enabled": enabled, "chat_id": settings.chat_id},
+            )
+        except Exception:
+            pass
+        return self._json(200, {"settings": settings.masked()})
+
+    def _telegram_test(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        from fxars.live.notifier import TelegramConfig, TelegramNotifier
+        from fxars.live.telegram_config import TelegramSettings
+        settings = TelegramSettings.load()
+        if not settings.token or not settings.chat_id:
+            raise ValidationError("telegram token/chat_id تنظیم نشده است.")
+        try:
+            cfg = TelegramConfig(token=settings.token, chat_id=settings.chat_id)
+            notifier = TelegramNotifier(cfg)
+            ok = notifier.send_message("✅ FX-ARS test message — settings works")
+            return self._json(200 if ok else 502, {
+                "ok": bool(ok), "chat_id": settings.chat_id,
+            })
+        except Exception as exc:
+            logger.exception("telegram test failed")
+            return self._json(502, {"ok": False, "error": str(exc)})
+
+
+    def _desktop_test(self, request: ApiRequest, params: dict, user) -> ApiResponse:
+        try:
+            from fxars.live.desktop_notify import DesktopNotifier
+            notifier = DesktopNotifier(enabled=True)
+            ok = notifier.send("FX-ARS", "Test desktop notification")
+            return self._json(200, {
+                "ok": bool(ok),
+                "backend": notifier._backend,
+                "available": notifier.is_available(),
+            })
+        except Exception as exc:
+            logger.exception("desktop test failed")
+            return self._json(502, {"ok": False, "error": str(exc)})
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -862,7 +1264,9 @@ class _Handler(BaseHTTPRequestHandler):
         for key, value in response.headers.items():
             self.send_header(key, value)
         self.end_headers()
-        self.wfile.write(response.body)
+        # FIX-04-HEAD-EMPTY-BODY: برای HEAD، body نوشته نمی‌شود (RFC 7231 §4.3.2)
+        if self.command != "HEAD":
+            self.wfile.write(response.body)
 
     def do_GET(self) -> None:  # noqa: N802
         self._handle("GET")
@@ -873,10 +1277,10 @@ class _Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(204)
         cors = getattr(self.server.app.settings.api, 'cors_allow_origin', '')  # type: ignore[attr-defined]
+
+# FIX-15-CORS-DEFAULT: پیش‌فرض same-origin (بدون ACAO)، نه *
         if cors:
             self.send_header('Access-Control-Allow-Origin', cors)
-        else:
-            self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE, PUT, PATCH, HEAD")
         self.end_headers()
@@ -943,3 +1347,8 @@ def serve(platform: Platform, host: str | None = None, port: int | None = None) 
 # FIX-08-RATE-LIMIT
 
 # FIX-08-OUTBOX-API
+
+
+# FIX-15-CORS-DEFAULT
+
+# FIX-21-TRADING-HISTORY

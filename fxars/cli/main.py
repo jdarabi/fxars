@@ -12,9 +12,10 @@ from typing import Any
 
 from fxars.analysis.modules import module_specs
 from fxars.config.settings import Settings
-from fxars.core.timeutil import parse_ts, utcnow
+from fxars.core.timeutil import format_ts, parse_ts, utcnow
+from fxars.data.reconciliation import match_candles
 from fxars.data.synthetic import generate_demo_bundle
-from fxars.domain.enums import BacktestSegment, OrderStatus, Role, ScenarioStatus
+from fxars.domain.enums import BacktestSegment, OrderStatus, Role, ScenarioStatus, Timeframe
 from fxars.platform import Platform
 from fxars.research.report import write_report
 from fxars.risk.account import demo_account
@@ -88,6 +89,63 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         "errors": result.errors[:5],
     }, ensure_ascii=False, indent=2))
     platform.close()
+
+
+def _match_groups(platform: Platform, args: argparse.Namespace) -> list[tuple[str, str, str]]:
+    if args.all:
+        rows = platform.db.query(
+            "SELECT DISTINCT instrument_id, timeframe, source_id FROM candles "
+            "ORDER BY instrument_id, timeframe, source_id"
+        )
+        return [(row["instrument_id"], row["timeframe"], row["source_id"]) for row in rows]
+    timeframe = Timeframe.parse(args.timeframe or "H1").value
+    sources = [args.source] if args.source else platform.candles.sources(args.instrument, timeframe)
+    return [(args.instrument, timeframe, source) for source in sources]
+
+
+def cmd_data_match(args: argparse.Namespace) -> None:
+    """گزارش صریح تطبیق تعداد و زمان کندل‌ها با تقویم معاملاتی."""
+    if not args.all and not args.instrument:
+        print("--instrument (یا --all) لازم است.", file=sys.stderr)
+        raise SystemExit(2)
+    platform = _platform(args)
+    try:
+        now = parse_ts(args.as_of) if args.as_of else None
+        start = parse_ts(args.start) if args.start else None
+        end = parse_ts(args.end) if args.end else None
+        reports = []
+        for instrument_id, timeframe, source_id in _match_groups(platform, args):
+            candles = platform.candles.range(
+                instrument_id, timeframe, source_id=source_id,
+                start=start, end=end, as_of=now,
+            )
+            reports.append(match_candles(
+                candles, instrument_id=instrument_id, timeframe=timeframe, source_id=source_id,
+                calendar=platform.calendar, now=now, start=start, end=end,
+            ))
+        if args.json:
+            print(json.dumps(
+                [report.to_dict(max_samples=args.max_samples) for report in reports],
+                ensure_ascii=False, indent=2,
+            ))
+            return
+        _print_table(
+            [report.to_dict() for report in reports],
+            [("instrument_id", "نماد"), ("timeframe", "تایم"), ("source_id", "منبع"),
+             ("expected", "انتظار"), ("present", "موجود"), ("matched", "منطبق"),
+             ("missing", "گمشده"), ("extra", "خارج‌ازشبکه"), ("duplicates", "تکراری"),
+             ("latest_expected_at", "آخرین مورد انتظار"), ("latest_present_at", "آخرین موجود")],
+        )
+        for report in reports:
+            prefix = f"{report.instrument_id}/{report.timeframe}/{report.source_id}"
+            if report.missing_times:
+                stamps = ", ".join(format_ts(moment) for moment in report.missing_times[:args.max_samples])
+                print(f"{prefix} گمشده‌ها: {stamps}")
+            if report.extra_times:
+                stamps = ", ".join(format_ts(moment) for moment in report.extra_times[:args.max_samples])
+                print(f"{prefix} خارج از شبکه: {stamps}")
+    finally:
+        platform.close()
 
 
 def cmd_analyze(args: argparse.Namespace) -> None:
@@ -202,6 +260,20 @@ def cmd_pbo(args: argparse.Namespace) -> None:
     platform.close()
 
 
+def cmd_research_gate(args: argparse.Namespace) -> None:
+    from fxars.research.acceptance import evaluate_run
+
+    platform = _platform(args)
+    try:
+        run = platform.backtests.get(args.run_id)
+        report = evaluate_run(run, policy=platform.settings.decision.acceptance)
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2, default=str))
+        if args.strict and not report.passed:
+            raise SystemExit(2)
+    finally:
+        platform.close()
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     from fxars.api.server import serve
 
@@ -220,6 +292,38 @@ def cmd_audit(args: argparse.Namespace) -> None:
             "action": entry.action, "entity": f"{entry.entity_type}:{entry.entity_id}",
         } for entry in entries], [("seq", "#"), ("time", "زمان"), ("actor", "کاربر"), ("action", "عملیات"), ("entity", "موجودیت")])
     platform.close()
+
+
+def cmd_audit_anchor(args: argparse.Namespace) -> None:
+    from fxars.audit.anchor import AuditAnchorSigner
+
+    platform = _platform(args)
+    try:
+        anchor = AuditAnchorSigner(platform.kms).sign(platform.audit_verify())
+        text = json.dumps(anchor.to_dict(), ensure_ascii=False, indent=2)
+        if args.out:
+            out = Path(args.out)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(text + "\n", encoding="utf-8")
+            print(f"لنگر ممیزی نوشته شد: {out}")
+        else:
+            print(text)
+    finally:
+        platform.close()
+
+
+def cmd_audit_verify_anchor(args: argparse.Namespace) -> None:
+    from fxars.audit.anchor import AuditAnchor, AuditAnchorSigner
+
+    anchor = AuditAnchor.from_dict(json.loads(Path(args.file).read_text(encoding="utf-8")))
+    platform = _platform(args)
+    try:
+        result = AuditAnchorSigner(platform.kms).verify(anchor, platform.audit_verify())
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if not result["valid"]:
+            raise SystemExit(2)
+    finally:
+        platform.close()
 
 
 def cmd_killswitch(args: argparse.Namespace) -> None:
@@ -242,10 +346,85 @@ def cmd_users(args: argparse.Namespace) -> None:
     else:
         password = args.password or getpass.getpass("رمز عبور: ")
         user, secret = platform.identity.create_user(args.username, Role(args.role), password,
-                                                     totp_enabled=args.mfa, actor=args.actor)
+                                                     totp_enabled=args.mfa, actor=args.actor,
+                                                     tenant_id=args.tenant)
         print(json.dumps({"user_id": user.user_id, "username": user.username, "role": user.role.value,
                           "totp_secret": secret}, ensure_ascii=False, indent=2))
     platform.close()
+
+
+def cmd_tenants(args: argparse.Namespace) -> None:
+    from fxars.audit.audit import AuditAction
+    from fxars.domain.models import Tenant
+    from fxars.tenancy.plans import PLANS
+
+    platform = _platform(args)
+    if args.action == "list":
+        rows = []
+        for tenant in platform.tenants.list():
+            limits = platform.quota.limits(tenant.tenant_id)
+            usage = platform.quota.usage(tenant.tenant_id)
+            rows.append({
+                "tenant": tenant.tenant_id, "name": tenant.name, "plan": tenant.plan,
+                "active": tenant.active, "users": usage.users,
+                "max_users": limits["max_users"], "analyses_today": usage.analyses_today,
+                "analysis_limit": limits["analysis_runs_per_day"],
+                "live_scenarios": usage.live_scenarios, "scenario_limit": limits["live_scenarios"],
+            })
+        _print_table(rows, [
+            ("tenant", "مستاجر"), ("name", "نام"), ("plan", "پلن"), ("active", "فعال"),
+            ("users", "کاربر"), ("max_users", "سقف کاربر"),
+            ("analyses_today", "تحلیل امروز"), ("analysis_limit", "سقف تحلیل"),
+            ("live_scenarios", "سناریو فعال"), ("scenario_limit", "سقف سناریو"),
+        ])
+    elif args.action == "create":
+        if not args.tenant or not args.name:
+            raise SystemExit("برای ساخت مستاجر، --tenant و --name الزامی است.")
+        if args.plan not in PLANS:
+            raise SystemExit(f"پلن نامعتبر است؛ گزینه‌ها: {', '.join(PLANS)}")
+        if platform.tenants.get(args.tenant) is not None:
+            raise SystemExit(f"مستاجر {args.tenant} از قبل وجود دارد.")
+        tenant = Tenant(tenant_id=args.tenant, name=args.name, active=True,
+                        created_at=platform.clock(), plan=args.plan)
+        platform.tenants.save(tenant)
+        platform.audit.append(
+            AuditAction.CONFIG_CHANGED, "tenant", tenant.tenant_id, actor=args.actor,
+            payload={"created": True, "plan": tenant.plan},
+        )
+        print(json.dumps(platform.quota.snapshot(tenant.tenant_id), ensure_ascii=False, indent=2))
+    else:
+        target = platform.tenants.get(args.tenant)
+        if target is None:
+            raise SystemExit(f"مستاجر {args.tenant} یافت نشد.")
+        if args.plan not in PLANS:
+            raise SystemExit(f"پلن نامعتبر است؛ گزینه‌ها: {', '.join(PLANS)}")
+        updated = replace(target, plan=args.plan)
+        platform.tenants.save(updated)
+        platform.audit.append(
+            AuditAction.CONFIG_CHANGED, "tenant", target.tenant_id, actor=args.actor,
+            payload={"plan": args.plan, "previous_plan": target.plan},
+        )
+        print(json.dumps(platform.quota.snapshot(updated.tenant_id), ensure_ascii=False, indent=2))
+    platform.close()
+
+
+def cmd_security_audit(args: argparse.Namespace) -> None:
+    from fxars.tenancy.audit_check import run_security_audit
+
+    platform = _platform(args)
+    result = run_security_audit(platform, tenant_id=args.tenant)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        for check in result["checks"]:
+            print(f"[{check['status'].upper()}] {check['title']}: {check['detail']}")
+        print(
+            f"\nنتیجه: {'موفق' if result['ok'] else 'ناموفق'} — "
+            f"pass={result['passed']} warn={result['warned']} fail={result['failed']} score={result['score']}"
+        )
+    platform.close()
+    if not result["ok"]:
+        raise SystemExit(1)
 
 
 def cmd_auth_code(args: argparse.Namespace) -> None:
@@ -335,6 +514,30 @@ def cmd_outbox(args: argparse.Namespace) -> None:
         platform.close()
 
 
+def cmd_download(args: argparse.Namespace) -> None:
+    """FIX-21-DOWNLOAD-CLI: دانلود هیستوری از MT5."""
+    from fxars.live.history import download_history
+    platform = _platform(args)
+    try:
+        result = download_history(
+            symbols=args.instruments,
+            timeframes=args.timeframes,
+            bars=args.bars,
+            output_dir=args.output_dir,
+            platform=platform if args.ingest else None,
+        )
+        print(f"Total candles: {result['total']}")
+        print(f"Files: {len(result['files'])}")
+        for f in result["files"]:
+            print(f"  {f}")
+        if result["errors"]:
+            print(f"Errors: {len(result['errors'])}")
+            for e in result["errors"][:10]:
+                print(f"  {e}")
+    finally:
+        platform.close()
+
+
 def cmd_reconcile(args: argparse.Namespace) -> None:
     """P6-3: تطبیق سفارش‌های UNKNOWN با Broker."""
     from fxars.execution.reconciliation import ReconciliationService
@@ -355,6 +558,52 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
             for r in results:
                 print(f"  {r.intent_id}: {r.from_status.value} → {r.to_status.value} ({r.reason})")
         print(f"تعداد تطبیق‌شده: {len(results)}")
+
+        if getattr(args, "closes", True):
+            if not callable(getattr(platform.execution.broker, "closed_position", None)):
+                print("(بروکر فعال تاریخچه بسته‌شدن ندارد؛ تطبیق معاملات بسته رد شد)")
+                return
+            close_results = platform.reconcile_closed_trades(
+                tenant_id=getattr(args, "tenant", "default"), actor=args.actor,
+            )
+            if not close_results:
+                print("(پوزیشن بسته‌شده‌ای برای ثبت یافت نشد)")
+            for r in close_results:
+                print(
+                    f"  {r.intent_id}: {r.from_status.value} → {r.to_status.value} "
+                    f"volume={r.closed_volume} net={r.net_profit} ({r.reason})"
+                )
+            print(f"تعداد معاملات بسته‌شدهٔ ثبت‌شده: {len(close_results)}")
+    finally:
+        platform.close()
+
+
+def cmd_attribution(args: argparse.Namespace) -> None:
+    platform = _platform(args)
+    try:
+        report = platform.attribution.report(
+            args.tenant,
+            since=parse_ts(args.since) if args.since else None,
+            until=parse_ts(args.until) if args.until else None,
+            instrument_id=args.instrument,
+            dimensions=(args.dimension,) if args.dimension else
+            ("instrument", "side", "timeframe", "regime", "strategy", "scenario", "module"),
+        )
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return
+        summary = report["summary"]
+        print(f"معاملات بسته‌شده: {summary['trades']} | برد={summary['wins']} باخت={summary['losses']} "
+              f"سربه‌سر={summary['breakeven']} نرخ برد={summary['win_rate']}")
+        print(f"سود خالص={summary['net_profit']} | Profit Factor={summary['profit_factor']} | "
+              f"Expectancy={summary['expectancy']} | R میانگین={summary['average_r']}")
+        for dimension, rows in report["breakdowns"].items():
+            print(f"\n— {dimension} —")
+            _print_table(rows, [
+                ("key", "کلید"), ("trades", "تعداد"), ("wins", "برد"), ("losses", "باخت"),
+                ("win_rate", "نرخ برد"), ("net_profit", "سود خالص"), ("profit_factor", "PF"),
+                ("average_r", "R میانگین"),
+            ])
     finally:
         platform.close()
 
@@ -476,45 +725,6 @@ def _copy_sqlite_to_postgres(settings, pg, *, tables=None, dry_run=False) -> dic
         sqlite.close()
 
 
-def _copy_sqlite_to_postgres(settings, pg, *, tables=None, dry_run=False) -> dict[str, int]:
-    """کپی داده از SQLite به Postgres با INSERT ... ON CONFLICT DO NOTHING."""
-    from fxars.storage.db import Database
-    sqlite = Database(settings.db_path)
-    try:
-        existing = {row["name"] for row in pg.query(
-            "SELECT table_name AS name FROM information_schema.tables WHERE table_schema='public'"
-        )}
-        all_tables = [row["name"] for row in sqlite.query(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_migrations'"
-        )]
-        targets = tables or all_tables
-        result: dict[str, int] = {}
-        for table in targets:
-            if table not in existing:
-                result[table] = 0
-                continue
-            cols = [r["name"] for r in sqlite.query(f"PRAGMA table_info({table})")]
-            if not cols:
-                result[table] = 0
-                continue
-            rows = sqlite.query(f"SELECT * FROM {table}")
-            if not rows:
-                result[table] = 0
-                continue
-            placeholders = ", ".join(["%s"] * len(cols))
-            col_list = ", ".join(cols)
-            sql = f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) ON CONFLICT DO NOTHING"
-            payload = [tuple(row[c] if not isinstance(row[c], dict | list) else __import__("json").dumps(row[c]) for c in cols) for row in rows]
-            if dry_run:
-                result[table] = len(payload)
-                continue
-            with pg.transaction():
-                cur = pg.executemany(sql, payload)
-                result[table] = cur.rowcount if cur.rowcount is not None else len(payload)
-        return result
-    finally:
-        sqlite.close()
-
 
 def cmd_selftest(args: argparse.Namespace) -> None:
     import unittest
@@ -561,6 +771,18 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--source", default="demo_feed")
     ingest.set_defaults(func=cmd_ingest)
 
+    match = sub.add_parser("data-match", parents=[common], help="گزارش تطبیق تعداد و زمان کندل‌ها با تقویم")
+    match.add_argument("--instrument")
+    match.add_argument("--timeframe")
+    match.add_argument("--source")
+    match.add_argument("--all", action="store_true", help="همه گروه‌های نماد/تایم‌فریم/منبع")
+    match.add_argument("--start")
+    match.add_argument("--end")
+    match.add_argument("--as-of")
+    match.add_argument("--max-samples", type=int, default=10)
+    match.add_argument("--json", action="store_true")
+    match.set_defaults(func=cmd_data_match)
+
     analyze = sub.add_parser("analyze", parents=[common], help="اجرای تحلیل")
     analyze.add_argument("--instrument", required=True)
     analyze.add_argument("--timeframe", default="H1")
@@ -603,6 +825,14 @@ def build_parser() -> argparse.ArgumentParser:
     pbo.add_argument("--timeframe", default="H1")
     pbo.set_defaults(func=cmd_pbo)
 
+    gate = sub.add_parser(
+        "research-gate", parents=[common],
+        help="دروازه پذیرش نتیجه بک‌تست و الگوهای ضدّی (سند تکمیلی ۹-۲)",
+    )
+    gate.add_argument("run_id")
+    gate.add_argument("--strict", action="store_true", help="کد خروج غیرصفر در صورت رد")
+    gate.set_defaults(func=cmd_research_gate)
+
     serve = sub.add_parser("serve", parents=[common], help="اجرای API و داشبورد")
     serve.add_argument("--host")
     serve.add_argument("--port", type=int)
@@ -612,6 +842,14 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("action", choices=["verify", "list"])
     audit.add_argument("--limit", type=int, default=30)
     audit.set_defaults(func=cmd_audit)
+
+    anchor = sub.add_parser("audit-anchor", parents=[common], help="امضای خارجی سر زنجیرهٔ ممیزی")
+    anchor.add_argument("--out", default="", help="مسیر فایل JSON لنگر؛ خالی یعنی چاپ در خروجی")
+    anchor.set_defaults(func=cmd_audit_anchor)
+
+    verify_anchor = sub.add_parser("audit-verify-anchor", parents=[common], help="تأیید لنگر خارجی زنجیرهٔ ممیزی")
+    verify_anchor.add_argument("--file", required=True, help="مسیر فایل JSON لنگر")
+    verify_anchor.set_defaults(func=cmd_audit_verify_anchor)
 
     kill = sub.add_parser("killswitch", parents=[common], help="کلید توقف اضطراری")
     kill.add_argument("action", choices=["status", "on", "off"])
@@ -625,17 +863,46 @@ def build_parser() -> argparse.ArgumentParser:
     users.add_argument("--role", default="ANALYST", choices=[role.value for role in Role])
     users.add_argument("--password")
     users.add_argument("--mfa", action="store_true")
+    users.add_argument("--tenant", default="default", help="شناسه مستاجر")
     users.add_argument("--actor", default="cli")
     users.set_defaults(func=cmd_users)
+
+    tenants = sub.add_parser("tenants", parents=[common], help="مدیریت مستاجر و پلن اشتراک")
+    tenants.add_argument("action", choices=["list", "create", "set-plan"])
+    tenants.add_argument("--tenant", help="شناسه مستاجر")
+    tenants.add_argument("--name", help="نام مستاجر (هنگام ساخت)")
+    tenants.add_argument("--plan", default="basic", help="پلن: basic/pro/enterprise")
+    tenants.add_argument("--actor", default="cli")
+    tenants.set_defaults(func=cmd_tenants)
+
+    audit_check = sub.add_parser("security-audit", parents=[common], help="ممیزی امنیت و حقوق داده (دروازه فاز ۷)")
+    audit_check.add_argument("--tenant", default="default", help="مستاجر برای گزارش حقوق داده")
+    audit_check.add_argument("--json", action="store_true", help="خروجی JSON")
+    audit_check.set_defaults(func=cmd_security_audit)
 
     code = sub.add_parser("auth", parents=[common], help="ابزارهای احراز هویت")
     code.add_argument("action", choices=["code"])
     code.add_argument("--username", default="admin")
     code.set_defaults(func=cmd_auth_code)
 
-    reconcile = sub.add_parser("reconcile", parents=[common], help="تطبیق سفارش‌های UNKNOWN")
+    reconcile = sub.add_parser("reconcile", parents=[common], help="تطبیق سفارش‌ها و معاملات بسته‌شده")
     reconcile.add_argument("--actor", default="cli")
+    reconcile.add_argument("--tenant", default="default")
+    reconcile.add_argument("--no-closes", dest="closes", action="store_false",
+                           help="فقط سفارش‌های UNKNOWN را تطبیق بده")
     reconcile.set_defaults(func=cmd_reconcile)
+
+    attribution = sub.add_parser("attribution", parents=[common],
+                                 help="گزارش سود/زیان واقعی و انتساب به نماد/رژیم/ماژول/استراتژی")
+    attribution.add_argument("--tenant", default="default")
+    attribution.add_argument("--since")
+    attribution.add_argument("--until")
+    attribution.add_argument("--instrument")
+    attribution.add_argument("--dimension", choices=["instrument", "side", "timeframe", "regime",
+                                                     "strategy", "scenario", "module"],
+                             help="یک بعد؛ بدون مقدار همه ابعاد")
+    attribution.add_argument("--json", action="store_true")
+    attribution.set_defaults(func=cmd_attribution)
 
     orders = sub.add_parser("orders", parents=[common], help="مدیریت سفارش‌ها")
     orders.add_argument("action", choices=["list", "show"])
@@ -651,8 +918,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     live = sub.add_parser("live", parents=[common], help="حلقه تحلیل real-time + Telegram")
     live.add_argument("--instrument", default=None, help="اگر نبود از config خوانده می‌شود")
+    live.add_argument("--instruments", default=None,
+                      help="فهرست نمادها با کاما (مثلاً EURUSD,GBPUSD,USDJPY) — اولویت بر --instrument")
     live.add_argument("--timeframe", default="H1")
-    live.add_argument("--interval", type=int, default=60)
+    live.add_argument("--interval", type=int, default=None)
     live.add_argument("--history", type=int, default=500)
     live.add_argument("--source", default="mt5")
     live.add_argument("--max-cycles", dest="max_cycles", type=int, default=None)
@@ -664,7 +933,17 @@ def build_parser() -> argparse.ArgumentParser:
     live.add_argument("--schedule-minutes", dest="schedule_minutes", default=None, help="مثلاً 0,15,30,45")
     live.add_argument("--schedule-hours", dest="schedule_hours", default=None, help="ساعت‌های UTC")
     live.add_argument("--schedule-days", dest="schedule_days", default=None, help="Mon,Tue,...")
+    live.add_argument("--execute-orders", dest="execute_orders", action="store_true",
+                      help="ارسال سفارش واقعی؛ نیازمند فاز DEMO/AUTOMATED_LIMITED و بروکر MT5")
     live.set_defaults(func=cmd_live_v2)
+
+    download = sub.add_parser("download", parents=[common], help="دانلود هیستوری از MT5")
+    download.add_argument("--instruments", nargs="+", required=True)
+    download.add_argument("--timeframes", nargs="+", required=True)
+    download.add_argument("--bars", type=int, default=5000)
+    download.add_argument("--output-dir", default="data/history")
+    download.add_argument("--ingest", action="store_true")
+    download.set_defaults(func=cmd_download)
 
     ac = sub.add_parser("ac", help="اجرای آزمون‌های پذیرش")
     ac.set_defaults(func=cmd_ac)
@@ -706,16 +985,31 @@ def main(argv: list[str] | None = None) -> int:
 def cmd_live_v2(args: argparse.Namespace) -> None:
     """Real-time daemon with config + multi-TF."""
     import logging
+    from logging.handlers import RotatingFileHandler
+    from pathlib import Path
 
     from fxars.live.config import LiveConfig, ScheduleConfig
     from fxars.live.daemon import LiveDaemon, LiveDaemonConfig
     from fxars.live.mt5_feed import MT5Feed, MT5UnavailableError
     from fxars.live.notifier import TelegramConfig, TelegramNotifier
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    log_dir = Path("logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "live.log"
+    _fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    _root = logging.getLogger()
+    _root.setLevel(logging.INFO)
+    for _h in list(_root.handlers):
+        _root.removeHandler(_h)
+    _con = logging.StreamHandler()
+    _con.setFormatter(_fmt)
+    _root.addHandler(_con)
+    _fh = RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=5, encoding="utf-8")
+    _fh.setFormatter(_fmt)
+    _root.addHandler(_fh)
+    _logger = logging.getLogger("fxars.live.cli")
+    _logger.info("cmd_live_v2 started")
+    print(f"Live log file: {log_file.resolve()}")
 
     live_config = None
     live_config_path = getattr(args, "live_config", None)
@@ -727,7 +1021,7 @@ def cmd_live_v2(args: argparse.Namespace) -> None:
             print(f"config error: {exc}", file=sys.stderr)
             raise SystemExit(2)
 
-    instrument = args.instrument or (live_config.instrument if live_config else "EURUSD")
+
     if getattr(args, "timeframes", None):
         timeframes = [t.strip().upper() for t in args.timeframes.split(",") if t.strip()]
     elif live_config is not None:
@@ -772,18 +1066,41 @@ def cmd_live_v2(args: argparse.Namespace) -> None:
         else:
             print("Telegram disabled (set FXARS_TELEGRAM_TOKEN + FXARS_TELEGRAM_CHAT_ID)", file=sys.stderr)
 
+        if getattr(args, "instruments", None):
+            _instruments = [s.strip().upper() for s in args.instruments.split(",") if s.strip()]
+        elif live_config is not None and getattr(live_config, "instruments", None):
+            _instruments = [s.strip().upper() for s in live_config.instruments if s and s.strip()]
+        elif getattr(args, "instrument", None):
+            _instruments = [args.instrument.strip().upper()]
+        elif live_config is not None and getattr(live_config, "instrument", None):
+            _instruments = [live_config.instrument.strip().upper()]
+        else:
+            _instruments = ["EURUSD"]
+        _min_score_threshold = float(
+            getattr(live_config, "min_score_threshold", 0.35) if live_config else 0.35
+        )
+        _execute_orders = bool(
+            getattr(args, "execute_orders", False)
+            or (getattr(live_config, "execute_orders", False) if live_config else False)
+        )
         cfg = LiveDaemonConfig(
-            instrument_id=instrument,
+            instrument_id=_instruments[0],
+            instruments=list(_instruments),
             timeframe=primary_tf,
-            timeframes=timeframes,
+            timeframes=list(timeframes),
             interval_seconds=int(interval),
             history_bars=int(history),
             source_id=source,
             send_no_trade=send_no_trade,
             max_signals_per_hour=int(max_signals),
             schedule=schedule,
+            min_score_threshold=_min_score_threshold,
+            execute_orders=_execute_orders,
+            reload_phase=True,
         )
         daemon = LiveDaemon(config=cfg, platform=platform, feed=feed, notifier=notifier)
+        logger_prefix = "EXECUTION" if _execute_orders else "ADVISORY"
+        print(f"Mode: {logger_prefix} (phase={platform.settings.phase.value})")
 
         import signal as _signal
         def _handle_sigint(signum, frame):
@@ -793,7 +1110,7 @@ def cmd_live_v2(args: argparse.Namespace) -> None:
         except Exception:
             pass
 
-        print(f"Live daemon: {cfg.instrument_id} {timeframes} every {cfg.interval_seconds}s")
+        print(f"Live daemon: {len(cfg.effective_instruments)} instrument(s) {cfg.effective_instruments} x {cfg.effective_timeframes} every {cfg.interval_seconds}s")
         if schedule:
             print(f"  schedule: mode={schedule.mode}, days={schedule.active_days}, "
                   f"hours={schedule.active_hours_utc[:3]}..., minutes={schedule.minute_offsets}")
@@ -811,3 +1128,7 @@ def cmd_live_v2(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+# FIX-04-DEDUP: _copy_sqlite_to_postgres تکراری حذف شد
+
+# FIX-21-DOWNLOAD-CLI

@@ -24,7 +24,7 @@ Write-Script '01-Remove-Secrets.ps1' @'
 [CmdletBinding()]
 param(
     [string]$ProjectRoot = 'C:\project\FX',
-    [string]$TokenPrefix = '8571434332',
+    [string]$TokenPrefix = 'REDACTED',
     [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'

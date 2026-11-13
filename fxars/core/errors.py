@@ -126,3 +126,15 @@ class RateLimitedError(FxarsError):
     code = "RATE_LIMITED"
     http_status = 429
     default_message = "تعداد درخواست‌ها بیش از حد مجاز است."
+
+
+class QuotaExceededError(FxarsError):
+    code = "QUOTA_EXCEEDED"
+    http_status = 429
+    default_message = "سهمیه اشتراک این مستاجر تکمیل شده است."
+
+
+class TenantInactiveError(FxarsError):
+    code = "TENANT_INACTIVE"
+    http_status = 403
+    default_message = "مستاجر غیرفعال است."

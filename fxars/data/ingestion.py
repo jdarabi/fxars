@@ -15,7 +15,7 @@ from fxars.data.providers import read_candle_csv
 from fxars.data.quality import DataQualityEngine
 from fxars.data.snapshot import snapshot_id
 from fxars.data.validation import CandleValidator
-from fxars.domain.models import Candle, DataQualityRun, Instrument
+from fxars.domain.models import Candle, DataQualityIssue, DataQualityRun, Instrument
 from fxars.storage.db import Database
 from fxars.storage.repositories import (
     CandleRepository,
@@ -34,7 +34,8 @@ class IngestionResult:
     quarantined: int
     duplicates: int
     revised: int
-    quality: DataQualityRun | None
+    conflicts: int = 0
+    quality: DataQualityRun | None = None
     raw_payload_id: str | None = None
     errors: list[dict[str, Any]] = field(default_factory=list)
 
@@ -75,14 +76,27 @@ class IngestionService:
         if not candles:
             raise DataInvalidError("فهرست کندل‌ها خالی است.")
         instrument = self.instruments.get(instrument_id)
+        if self.instruments.get_source(source_id) is None:
+            raise DataInvalidError(
+                "منبع داده در سامانه ثبت نشده است؛ ثبت منبع پیش از ورود داده الزامی است.",
+                details={"source_id": source_id},
+            )
         tf = candles[0].timeframe
         if any(candle.timeframe != tf for candle in candles):
             raise DataInvalidError("کندل‌های یک دسته باید تایم‌فریم یکسان داشته باشند.")
         if any(candle.instrument_id != instrument_id for candle in candles):
             raise DataInvalidError("کندل‌ها با instrument_id درخواست سازگار نیستند.")
+        if any(candle.source_id != source_id for candle in candles):
+            raise DataInvalidError(
+                "source_id کندل‌ها با منبع درخواست سازگار نیست.",
+                details={"expected": source_id, "received": sorted({c.source_id for c in candles})},
+            )
 
         moment = now or utcnow()
-        validator = CandleValidator(instrument, now=moment)
+        validator = CandleValidator(
+            instrument, max_spread_pips=self.quality.settings.max_spread_pips, now=moment,
+            calendar=self.quality.calendar,
+        )
         # FIX-01-INGESTION-TX: کل چرخه در یک تراکنش واحد.
         accepted: list[Candle] = []
         quarantine_items: list[tuple[Candle, tuple[str, ...]]] = []
@@ -97,6 +111,19 @@ class IngestionService:
                 accepted.append(stored)
 
         stats = {"inserted": 0, "duplicate": 0, "revised": 0}
+        conflicts = 0
+        deduped: dict[datetime, Candle] = {}
+        for candle in accepted:
+            previous = deduped.get(candle.open_time)
+            if previous is None:
+                deduped[candle.open_time] = candle
+                continue
+            stats["duplicate"] += 1
+            if previous.digest() != candle.digest():
+                conflicts += 1
+                quarantine_items.append((candle, ("conflicting_duplicate_timestamp",)))
+        accepted = list(deduped.values())
+
         quality_run: DataQualityRun | None = None
         snapshot = ""
         raw_id: str | None = None
@@ -106,7 +133,9 @@ class IngestionService:
                 self.candles.quarantine(candle, reasons)
             quarantined = len(quarantine_items)
             if accepted:
-                stats = self.candles.bulk_upsert(accepted)
+                stored_stats = self.candles.bulk_upsert(accepted)
+                for key in stats:
+                    stats[key] += stored_stats[key]
             if raw_content is not None:
                 raw_id = self.raw_payloads.store(
                     source_id, "candles_csv", raw_content,
@@ -126,6 +155,18 @@ class IngestionService:
                 instrument=instrument, timeframe=tf, source_id=source_id,
                 candles=series, now=moment, reference_candles=reference_series,
             )
+            if conflicts:
+                quality_run = replace(
+                    quality_run,
+                    verdict="FAIL" if quality_run.verdict == "FAIL" else "WARN",
+                    issues=quality_run.issues + (
+                        DataQualityIssue(
+                            "conflicting_duplicate_timestamp", "WARN",
+                            f"{conflicts} کندل با زمان یکسان و محتوای متفاوت در یک دسته دریافت شد؛ نسخه اول نگه داشته شد.",
+                            details={"conflicts": conflicts},
+                        ),
+                    ),
+                )
             self.quality_runs.save(quality_run)
             snapshot = snapshot_id(series, instrument_id, tf)
             self.audit.append(
@@ -137,6 +178,7 @@ class IngestionService:
                     "accepted": len(accepted),
                     "quarantined": quarantined,
                     **stats,
+                    "conflicts": conflicts,
                     "quality_run_id": quality_run.run_id,
                     "quality_verdict": quality_run.verdict,
                 },
@@ -149,7 +191,8 @@ class IngestionService:
             self.outbox.emit(
                 EventType.CANDLES_INGESTED,
                 {"instrument_id": instrument_id, "timeframe": tf, "source_id": source_id,
-                 "accepted": len(accepted), "quarantined": quarantined, "snapshot_id": snapshot},
+                 "accepted": len(accepted), "quarantined": quarantined,
+                 "conflicts": conflicts, "snapshot_id": snapshot},
                 occurred_at=moment,
             )
             self.outbox.emit(
@@ -166,6 +209,7 @@ class IngestionService:
             quarantined=len(quarantine_items),
             duplicates=stats["duplicate"],
             revised=stats["revised"],
+            conflicts=conflicts,
             quality=quality_run,
             raw_payload_id=raw_id,
         )

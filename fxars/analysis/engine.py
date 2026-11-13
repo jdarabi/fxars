@@ -151,8 +151,12 @@ class AnalysisEngine:
             "roc": round(context.indicators.roc[-1] * 100, 4) if context.indicators.roc[-1] is not None else None,
             "atr_pips": atr_pips,
             "atr_percentile": round(percentile, 1) if percentile is not None else None,
-            "session": list(context.calendar.sessions_at(context.as_of)),
-            "market_open": context.calendar.is_market_open(context.as_of),
+            "session": list(context.calendar.sessions_at(
+                context.as_of, instrument_id=context.instrument.instrument_id,
+            )),
+            "market_open": context.calendar.is_market_open(
+                context.as_of, instrument_id=context.instrument.instrument_id,
+            ),
             "evidence_count": len(evidences),
             "families": families,
             "reference_correlations": correlations,

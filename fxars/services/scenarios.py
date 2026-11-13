@@ -1,4 +1,4 @@
-"""سرویس سناریو: ارزیابی شرط‌ها و گذارهای ثبت‌شده."""
+﻿"""سرویس سناریو: ارزیابی شرط‌ها و گذارهای ثبت‌شده."""
 
 from __future__ import annotations
 
@@ -58,7 +58,19 @@ class ScenarioService:
             return ScenarioEvaluation(scenario, None, "SCENARIO_TERMINAL")
         moment = now or self.clock()
         instrument = self.instruments.get(scenario.instrument_id)
-        candles = self.candles.range(scenario.instrument_id, scenario.timeframe, as_of=moment, closed_only=True)
+        # FIX-DUAL: primary_source + فقط VALID
+        try:
+            primary_source = self.instruments.primary_source(
+                scenario.instrument_id, scenario.timeframe,
+            )
+        except Exception:
+            primary_source = None
+        all_candles = self.candles.range(
+            scenario.instrument_id, scenario.timeframe,
+            source_id=primary_source, as_of=moment, closed_only=True,
+        )
+        from fxars.domain.enums import QualityStatus
+        candles = [c for c in all_candles if c.quality_status is not QualityStatus.INVALID]
         outcome = self.evaluator.evaluate(scenario, candles, moment, instrument)
         if not outcome.changed:
             return ScenarioEvaluation(scenario, None, outcome.reason)

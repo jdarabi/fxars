@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from fxars.core.context import current_correlation_id
 from fxars.core.hashing import sha256_obj
@@ -20,6 +20,7 @@ from fxars.core.serde import jsonable
 from fxars.core.timeutil import ensure_utc, format_ts, parse_ts
 from fxars.domain.enums import (
     AnalysisStatus,
+    ApprovalStatus,
     BacktestSegment,
     DecisionAction,
     Direction,
@@ -137,7 +138,7 @@ class Instrument:
         return self.pip_size * self.contract_size
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Instrument:
@@ -161,8 +162,28 @@ class DataSource:
     priority: int = 100
     notes: str = ""
 
+    def __post_init__(self) -> None:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        source_id = str(self.source_id or "").strip()
+        if not source_id:
+            raise ValueError("source_id منبع داده الزامی است")
+        object.__setattr__(self, "source_id", source_id)
+        retention = int(self.retention_days)
+        if retention <= 0:
+            raise ValueError("retention_days باید عددی مثبت باشد")
+        object.__setattr__(self, "retention_days", retention)
+        timezone = str(self.timezone or "").strip()
+        if not timezone:
+            raise ValueError("timezone منبع داده الزامی است")
+        try:
+            ZoneInfo(timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"timezone منبع داده نامعتبر است: {timezone!r}") from exc
+        object.__setattr__(self, "timezone", timezone)
+
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
 
 # --------------------------------------------------------------------------- بازار
@@ -368,7 +389,7 @@ class EconomicEvent:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EconomicEvent:
@@ -414,7 +435,7 @@ class Position:
 
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
 
 @dataclass(frozen=True, slots=True)
@@ -459,7 +480,7 @@ class AccountSnapshot:
         return max(ZERO, (self.peak_equity - self.equity) / self.peak_equity)
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
 
 # --------------------------------------------------------------------------- تحلیل
@@ -568,7 +589,7 @@ class Decision:
     strength: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
 
 @dataclass(frozen=True, slots=True)
@@ -590,6 +611,7 @@ class AnalysisRun:
     decision: dict[str, Any]
     data_quality: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    tenant_id: str = "default"
 
     def to_dict(self) -> dict[str, Any]:
         payload = jsonable(self)
@@ -597,7 +619,7 @@ class AnalysisRun:
         payload["started_at"] = format_ts(self.started_at)
         payload["finished_at"] = format_ts(self.finished_at) if self.finished_at else None
         payload["status"] = self.status.value
-        return payload
+        return payload  # type: ignore[no-any-return]
 
 
 # --------------------------------------------------------------------------- سناریو
@@ -623,6 +645,7 @@ class Scenario:
     entry_zone: PriceZone | None = None
     risk_decision_id: str | None = None
     strength: float = 0.0
+    tenant_id: str = "default"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "expiry_at", _dt(self.expiry_at))
@@ -672,6 +695,7 @@ class Scenario:
             "rules_version": self.rules_version,
             "config_hash": self.config_hash,
             "strength": round(float(self.strength), 6),
+            "tenant_id": self.tenant_id,
         }
 
     @classmethod
@@ -698,6 +722,7 @@ class Scenario:
             entry_zone=PriceZone(zone["low"], zone["high"]) if zone else None,
             risk_decision_id=data.get("risk_decision_id"),
             strength=float(data.get("strength", 0.0)),
+            tenant_id=data.get("tenant_id", "default"),
         )
 
 
@@ -716,7 +741,7 @@ class ScenarioTransition:
     correlation_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
 
 # --------------------------------------------------------------------------- ریسک
@@ -729,7 +754,7 @@ class RiskCheck:
     limit: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
 
 @dataclass(frozen=True, slots=True)
@@ -753,6 +778,7 @@ class RiskDecision:
     created_at: datetime
     inputs_hash: str
     correlation_id: str = field(default_factory=current_correlation_id)
+    tenant_id: str = "default"
 
     def __post_init__(self) -> None:
         for name in ("risk_amount", "position_size", "entry_price", "stop_loss"):
@@ -796,6 +822,7 @@ class RiskDecision:
             "created_at": format_ts(self.created_at),
             "inputs_hash": self.inputs_hash,
             "correlation_id": self.correlation_id,
+            "tenant_id": self.tenant_id,
         }
 
 
@@ -815,6 +842,7 @@ class OrderIntent:
     status: OrderStatus
     phase: Phase
     correlation_id: str = ""
+    tenant_id: str = "default"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "volume", to_decimal(self.volume, field="volume"))
@@ -848,6 +876,7 @@ class OrderIntent:
             "status": self.status.value,
             "phase": self.phase.value,
             "correlation_id": self.correlation_id,
+            "tenant_id": self.tenant_id,
         }
 
     @classmethod
@@ -866,6 +895,7 @@ class OrderIntent:
             status=OrderStatus(data["status"]),
             phase=Phase(data["phase"]),
             correlation_id=data.get("correlation_id", ""),
+            tenant_id=data.get("tenant_id", "default"),
         )
 
 
@@ -882,7 +912,7 @@ class BrokerOrder:
     message: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
 
 @dataclass(frozen=True, slots=True)
@@ -895,7 +925,133 @@ class Fill:
     filled_at: datetime
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
+
+
+# --------------------------------------------------------------------------- نتیجه معامله
+@dataclass(frozen=True, slots=True)
+class ClosedTrade:
+    """معامله بسته‌شده بر اساس تاریخچه واقعی بروکر (نه قیمت ساختگی)."""
+
+    trade_id: str
+    intent_id: str
+    tenant_id: str
+    instrument_id: str
+    side: Side
+    volume: Decimal
+    entry_price: Decimal | None
+    exit_price: Decimal | None
+    opened_at: datetime
+    closed_at: datetime
+    gross_profit: Decimal
+    commission: Decimal
+    swap: Decimal
+    net_profit: Decimal
+    risk_amount: Decimal | None = None
+    r_multiple: Decimal | None = None
+    scenario_id: str | None = None
+    analysis_run_id: str | None = None
+    risk_decision_id: str | None = None
+    timeframe: str | None = None
+    strategy: str | None = None
+    regime: str | None = None
+    evidence_modules: tuple[str, ...] = ()
+    supporting_modules: tuple[str, ...] = ()
+    broker_position_id: str = ""
+    close_source: str = "broker_history"
+    broker_deal_ids: tuple[str, ...] = ()
+    recorded_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("volume", "gross_profit", "commission", "swap", "net_profit"):
+            object.__setattr__(self, name, to_decimal(getattr(self, name), field=name))
+        for name in ("entry_price", "exit_price", "risk_amount", "r_multiple"):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, to_decimal(value, field=name))
+        for name in ("opened_at", "closed_at", "recorded_at"):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, _dt(value))
+        if isinstance(self.side, str):
+            object.__setattr__(self, "side", Side(self.side))
+        object.__setattr__(self, "evidence_modules", tuple(self.evidence_modules))
+        object.__setattr__(self, "supporting_modules", tuple(self.supporting_modules))
+        object.__setattr__(self, "broker_deal_ids", tuple(self.broker_deal_ids))
+
+    @property
+    def outcome(self) -> str:
+        if self.net_profit > ZERO:
+            return "WIN"
+        if self.net_profit < ZERO:
+            return "LOSS"
+        return "BREAKEVEN"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trade_id": self.trade_id,
+            "intent_id": self.intent_id,
+            "tenant_id": self.tenant_id,
+            "instrument_id": self.instrument_id,
+            "side": self.side.value,
+            "volume": format(self.volume, "f"),
+            "entry_price": format(self.entry_price, "f") if self.entry_price is not None else None,
+            "exit_price": format(self.exit_price, "f") if self.exit_price is not None else None,
+            "opened_at": format_ts(self.opened_at),
+            "closed_at": format_ts(self.closed_at),
+            "gross_profit": format(self.gross_profit, "f"),
+            "commission": format(self.commission, "f"),
+            "swap": format(self.swap, "f"),
+            "net_profit": format(self.net_profit, "f"),
+            "risk_amount": format(self.risk_amount, "f") if self.risk_amount is not None else None,
+            "r_multiple": format(self.r_multiple, "f") if self.r_multiple is not None else None,
+            "outcome": self.outcome,
+            "scenario_id": self.scenario_id,
+            "analysis_run_id": self.analysis_run_id,
+            "risk_decision_id": self.risk_decision_id,
+            "timeframe": self.timeframe,
+            "strategy": self.strategy,
+            "regime": self.regime,
+            "evidence_modules": list(self.evidence_modules),
+            "supporting_modules": list(self.supporting_modules),
+            "broker_position_id": self.broker_position_id,
+            "close_source": self.close_source,
+            "broker_deal_ids": list(self.broker_deal_ids),
+            "recorded_at": format_ts(self.recorded_at) if self.recorded_at else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ClosedTrade:
+        return cls(
+            trade_id=data["trade_id"],
+            intent_id=data["intent_id"],
+            tenant_id=data.get("tenant_id", "default"),
+            instrument_id=data["instrument_id"],
+            side=Side(data["side"]),
+            volume=to_decimal(data["volume"]),
+            entry_price=to_decimal(data["entry_price"]) if data.get("entry_price") else None,
+            exit_price=to_decimal(data["exit_price"]) if data.get("exit_price") else None,
+            opened_at=parse_ts(data["opened_at"]),
+            closed_at=parse_ts(data["closed_at"]),
+            gross_profit=to_decimal(data.get("gross_profit", 0)),
+            commission=to_decimal(data.get("commission", 0)),
+            swap=to_decimal(data.get("swap", 0)),
+            net_profit=to_decimal(data.get("net_profit", 0)),
+            risk_amount=to_decimal(data["risk_amount"]) if data.get("risk_amount") else None,
+            r_multiple=to_decimal(data["r_multiple"]) if data.get("r_multiple") else None,
+            scenario_id=data.get("scenario_id"),
+            analysis_run_id=data.get("analysis_run_id"),
+            risk_decision_id=data.get("risk_decision_id"),
+            timeframe=data.get("timeframe"),
+            strategy=data.get("strategy"),
+            regime=data.get("regime"),
+            evidence_modules=tuple(data.get("evidence_modules") or ()),
+            supporting_modules=tuple(data.get("supporting_modules") or ()),
+            broker_position_id=data.get("broker_position_id", ""),
+            close_source=data.get("close_source", "broker_history"),
+            broker_deal_ids=tuple(data.get("broker_deal_ids") or ()),
+            recorded_at=parse_ts(data["recorded_at"]) if data.get("recorded_at") else None,
+        )
 
 
 # --------------------------------------------------------------------------- کیفیت داده
@@ -908,7 +1064,7 @@ class DataQualityIssue:
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
 
 @dataclass(frozen=True, slots=True)
@@ -927,6 +1083,11 @@ class DataQualityRun:
     verdict: str
     issues: tuple[DataQualityIssue, ...]
     latest_bar_age_seconds: float
+    expected: int = 0
+    matched: int = 0
+    extra: int = 0
+    latest_expected_at: datetime | None = None
+    latest_present_at: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -943,11 +1104,31 @@ class DataQualityRun:
             "stale": self.stale,
             "verdict": self.verdict,
             "latest_bar_age_seconds": round(self.latest_bar_age_seconds, 3),
+            "expected": self.expected,
+            "matched": self.matched,
+            "extra": self.extra,
+            "latest_expected_at": format_ts(self.latest_expected_at) if self.latest_expected_at else None,
+            "latest_present_at": format_ts(self.latest_present_at) if self.latest_present_at else None,
             "issues": [issue.to_dict() for issue in self.issues],
         }
 
 
 # --------------------------------------------------------------------------- هویت
+@dataclass(frozen=True, slots=True)
+class Tenant:
+    tenant_id: str
+    name: str
+    active: bool
+    created_at: datetime
+    plan: str = "basic"
+    quota_overrides: dict[str, int] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        data = jsonable(self)
+        data["created_at"] = format_ts(self.created_at)
+        return data  # type: ignore[no-any-return]
+
+
 @dataclass(frozen=True, slots=True)
 class User:
     user_id: str
@@ -965,7 +1146,7 @@ class User:
         data.pop("password_hash", None)
         data.pop("totp_secret_enc", None)
         data["mfa_enabled"] = bool(self.totp_secret_enc)
-        return data
+        return data  # type: ignore[no-any-return]
 
 
 @dataclass(frozen=True, slots=True)
@@ -982,6 +1163,60 @@ class SessionRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class OrderApproval:
+    """تأیید چهارچشمی سفارش در فاز ASSISTED (بخش ۱۱-۲ سند)."""
+
+    intent_id: str
+    requested_by: str
+    requested_at: datetime
+    expires_at: datetime
+    status: ApprovalStatus = ApprovalStatus.PENDING
+    approved_by: str = ""
+    decided_at: datetime | None = None
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "requested_at", _dt(self.requested_at))
+        object.__setattr__(self, "expires_at", _dt(self.expires_at))
+        if self.decided_at is not None:
+            object.__setattr__(self, "decided_at", _dt(self.decided_at))
+        if isinstance(self.status, str):
+            object.__setattr__(self, "status", ApprovalStatus(self.status))
+
+    @property
+    def is_active(self) -> bool:
+        return self.status is ApprovalStatus.APPROVED
+
+    def is_expired(self, now: datetime) -> bool:
+        return ensure_utc(now) >= self.expires_at
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "intent_id": self.intent_id,
+            "requested_by": self.requested_by,
+            "requested_at": format_ts(self.requested_at),
+            "expires_at": format_ts(self.expires_at),
+            "status": self.status.value,
+            "approved_by": self.approved_by,
+            "decided_at": format_ts(self.decided_at) if self.decided_at else None,
+            "reason": self.reason,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> OrderApproval:
+        return cls(
+            intent_id=data["intent_id"],
+            requested_by=data["requested_by"],
+            requested_at=parse_ts(data["requested_at"]),
+            expires_at=parse_ts(data["expires_at"]),
+            status=ApprovalStatus(data.get("status", "PENDING")),
+            approved_by=data.get("approved_by", ""),
+            decided_at=parse_ts(data["decided_at"]) if data.get("decided_at") else None,
+            reason=data.get("reason", ""),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ModelRecord:
     model_id: str
     version: str
@@ -995,7 +1230,7 @@ class ModelRecord:
     status: str = "CANDIDATE"
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
 
 # --------------------------------------------------------------------------- ممیزی و رویداد
@@ -1016,7 +1251,7 @@ class AuditEntry:
     def to_dict(self) -> dict[str, Any]:
         data = jsonable(self)
         data.pop("seq", None)
-        return data
+        return data  # type: ignore[no-any-return]
 
 
 @dataclass(frozen=True, slots=True)
@@ -1030,7 +1265,7 @@ class OutboxEvent:
     published_at: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return jsonable(self)
+        return cast(dict[str, Any], jsonable(self))  # FIX-MYPY
 
 
 # --------------------------------------------------------------------------- پژوهش

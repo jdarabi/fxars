@@ -99,5 +99,31 @@ class ParityTests(unittest.TestCase):
                 db.close()
 
 
+class QuarantineMigrationTests(unittest.TestCase):
+    def test_migrate_merges_legacy_duplicate_quarantine_rows(self):
+        db = Database(":memory:")
+        try:
+            db.migrate()
+            db.execute("DROP INDEX uq_candle_quarantine_bar")
+            for payload in ('{"close": "1.0"}', '{"close": "2.0"}'):
+                db.execute(
+                    "INSERT INTO candle_quarantine (instrument_id, source_id, timeframe, open_time, "
+                    "reasons, payload, created_at) VALUES "
+                    "('EURUSD', 'demo_feed', 'H1', '2026-01-01T00:00:00Z', '[\"high_below_low\"]', ?, "
+                    "'2026-01-01T00:00:00Z')",
+                    (payload,),
+                )
+            db.migrate()
+            rows = db.query("SELECT payload FROM candle_quarantine")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["payload"], '{"close": "2.0"}')
+            index = db.scalar(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name='uq_candle_quarantine_bar'"
+            )
+            self.assertEqual(index, 1)
+        finally:
+            db.close()
+
+
 if __name__ == "__main__":
     unittest.main()

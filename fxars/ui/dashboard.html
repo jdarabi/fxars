@@ -1,0 +1,2583 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FX-ARS</title>
+<style>
+:root{--bg:#0b1220;--panel:#111c33;--panel2:#0e1830;--border:#1e3a5f;--text:#e2e8f0;--muted:#94a3b8;--accent:#38bdf8;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--live:#a855f7}
+*{box-sizing:border-box}
+body{margin:0;font-family:Tahoma,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+header{display:flex;gap:10px;align-items:center;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;flex-wrap:wrap}
+header h1{font-size:17px;margin:0;color:var(--accent);white-space:nowrap}
+header .spacer{flex:1}
+.badge{padding:3px 10px;border-radius:999px;font-size:12px;border:1px solid var(--border);background:var(--panel2)}
+.badge.ok{color:var(--ok);border-color:#14532d}.badge.bad{color:var(--bad);border-color:#7f1d1d}
+.badge.clickable{cursor:pointer;transition:0.2s}
+.badge.clickable:hover{background:rgba(56,189,248,.15);border-color:var(--accent)}
+.tabs{display:flex;gap:2px;background:var(--panel2);border-bottom:1px solid var(--border);padding:0 18px;overflow-x:auto;position:sticky;top:57px;z-index:9}
+.tab{padding:12px 18px;background:transparent;border:none;color:var(--muted);cursor:pointer;font-family:inherit;font-size:13px;border-bottom:3px solid transparent;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.tab:hover{color:var(--text);background:rgba(255,255,255,.03)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);background:rgba(56,189,248,.06)}
+.tab.live-tab.active{color:var(--live);border-bottom-color:var(--live);background:rgba(168,85,247,.08)}
+.tab .live-pulse{width:8px;height:8px;border-radius:50%;background:var(--live);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+main{padding:20px;max-width:1400px;margin:0 auto}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px}
+.card.live-card{border-color:var(--live);background:linear-gradient(180deg,rgba(168,85,247,.05),transparent)}
+.card h2{font-size:15px;margin:0 0 12px;color:#93c5fd;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px}
+.grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.grid-4{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.stat{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:14px;transition:.2s}
+.stat:hover{border-color:var(--accent)}
+.stat .label{color:var(--muted);font-size:12px;margin-bottom:6px}
+.stat .value{font-size:22px;color:var(--accent);font-weight:bold}
+.stat .value.pos{color:var(--ok)}.stat .value.neg{color:var(--bad)}
+.stat.live-stat{border-color:rgba(168,85,247,.4)}
+.stat.live-stat .value{color:var(--live)}
+label{display:block;color:var(--muted);font-size:12px;margin:10px 0 4px}
+input,select,button{font-family:inherit;font-size:13px}
+input,select{width:100%;padding:9px;border-radius:9px;border:1px solid var(--border);background:#0a1428;color:var(--text)}
+button{padding:9px 14px;border-radius:9px;border:1px solid #0369a1;background:#0c4a6e;color:#e0f2fe;cursor:pointer;white-space:nowrap;transition:.15s}
+button:hover{background:#075985}button:disabled{opacity:.55;cursor:not-allowed}
+button.danger{border-color:#991b1b;background:#7f1d1d}
+button.danger:hover{background:#991b1b}
+button.ghost{background:transparent;border-color:var(--border);color:var(--muted)}
+button.ghost:hover{color:var(--text);border-color:var(--accent)}
+button.live-btn{border-color:var(--live);background:rgba(168,85,247,.15);color:#e9d5ff}
+button.live-btn:hover{background:rgba(168,85,247,.3)}
+.row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}.row>*{flex:1;min-width:140px}.row button{flex:0 0 auto}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{padding:8px;border-bottom:1px solid var(--border);text-align:right;font-size:12px;vertical-align:top}
+th{color:#93c5fd;font-weight:600;position:sticky;top:0;background:var(--panel)}
+tbody tr:hover{background:rgba(56,189,248,.04)}
+pre{white-space:pre-wrap;background:#0a1428;border:1px solid var(--border);border-radius:10px;padding:10px;max-height:400px;overflow:auto;font-size:12px;direction:ltr;text-align:left}
+.muted{color:var(--muted);font-size:12px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12px;margin-top:8px}
+.kv b{color:var(--muted);font-weight:500}
+.hidden{display:none!important}
+.pos{color:var(--ok)}.neg{color:var(--bad)}.warn{color:var(--warn)}
+#toast{position:fixed;bottom:16px;left:16px;background:#0c4a6e;border:1px solid #0369a1;padding:10px 16px;border-radius:10px;opacity:0;transition:.3s;z-index:100;max-width:70vw;color:#e0f2fe}
+#toast.show{opacity:1}
+.role-btn{padding:10px;border-radius:9px;border:1px solid var(--border);background:var(--panel2);color:var(--muted);cursor:pointer;font-family:inherit;font-size:13px}
+.role-btn.active{border-color:var(--accent);background:rgba(56,189,248,.12);color:var(--accent);font-weight:bold}
+.login{max-width:440px;margin:7vh auto;background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:26px;box-shadow:0 20px 50px #0008}
+.login h1{color:var(--accent);font-size:20px;margin:0 0 4px}
+.login .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+#loginError{color:#f87171;min-height:18px;font-size:12px;margin-top:10px}
+.checkbox-list{max-height:240px;overflow-y:auto;background:#0a1428;border:1px solid var(--border);border-radius:9px;padding:8px}
+.checkbox-list label{display:flex;align-items:center;gap:8px;margin:4px 0;cursor:pointer;color:var(--text)}
+.checkbox-list input[type=checkbox]{width:auto}
+#chartContainer{height:420px;background:#0a1428;border-radius:10px;border:1px solid var(--border)}
+#rsiContainer{height:140px;background:#0a1428;border-radius:10px;border:1px solid var(--border);margin-top:8px}
+.chart-toolbar{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px}
+.chart-toolbar>div{flex:0 0 auto;min-width:130px}
+.chart-toolbar label{margin:0;display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:12px}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:5px}
+.status-dot.active{background:var(--ok);box-shadow:0 0 5px var(--ok);animation:pulse 2s infinite}
+.status-dot.inactive{background:var(--bad)}
+#phaseModal{position:fixed;inset:0;background:rgba(0,0,0,0.7);display:none;align-items:center;justify-content:center;z-index:200}
+#phaseModal.active{display:flex}
+.modal-card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px;width:100%;max-width:500px;box-shadow:0 20px 50px #000}
+.mode-option{border:2px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;cursor:pointer;transition:0.2s}
+.mode-option:hover{border-color:var(--accent)}
+.mode-option.selected{border-color:var(--ok);background:rgba(34,197,94,.1)}
+.mode-option h3{margin:0 0 6px;font-size:15px;color:var(--text)}
+.mode-option p{margin:0;font-size:12px;color:var(--muted)}
+.warn-box{background:rgba(239,68,68,.1);border:1px solid #991b1b;color:#f87171;padding:10px;border-radius:8px;margin-bottom:12px;font-size:13px}
+.live-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 18px;background:linear-gradient(90deg,rgba(168,85,247,.15),rgba(56,189,248,.08));border:1px solid var(--live);border-radius:14px;margin-bottom:12px}
+.live-header h2{font-size:16px;color:#e9d5ff;margin:0}
+.live-sub{font-size:12px;color:var(--muted);margin-top:3px}
+.live-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.live-meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:0 2px 14px}
+.live-meta b{color:var(--text);font-weight:600}
+.source-badge{display:inline-block;padding:2px 8px;border-radius:6px;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.35);color:#7dd3fc;font-size:11px;font-weight:bold}
+.source-badge.broker{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.4);color:#86efac}
+.source-badge.system{background:rgba(168,85,247,.12);border-color:rgba(168,85,247,.4);color:#d8b4fe}
+.source-badge.none{background:rgba(148,163,184,.1);border-color:var(--border);color:var(--muted)}
+.alert{background:rgba(245,158,11,.1);border:1px solid #92400e;color:#fbbf24;padding:10px 12px;border-radius:10px;font-size:12px;margin-bottom:14px;line-height:1.8}
+.alert.error{background:rgba(239,68,68,.1);border-color:#991b1b;color:#f87171}
+.alert.info{background:rgba(56,189,248,.08);border-color:#0369a1;color:#7dd3fc}
+.live-card-actions{display:inline-flex;gap:6px;align-items:center}
+td.num,th.num{font-variant-numeric:tabular-nums;direction:ltr;text-align:left}
+.live-empty-sub{margin-top:6px;font-size:11px;color:var(--muted)}
+.live-header .live-indicator{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:4px 12px;border-radius:999px;background:rgba(0,0,0,.3);border:1px solid var(--border)}
+.live-header .live-indicator.on{color:var(--ok);border-color:#14532d}
+.live-header .live-indicator.on .dot{background:var(--ok);animation:pulse 1.2s infinite}
+.live-header .live-indicator.off{color:var(--bad);border-color:#7f1d1d}
+.live-header .live-indicator .dot{width:8px;height:8px;border-radius:50%;background:var(--bad)}
+.pill{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:bold}
+.pill.long{background:rgba(34,197,94,.15);color:var(--ok)}
+.pill.short{background:rgba(239,68,68,.15);color:var(--bad)}
+.pill.triggered{background:rgba(34,197,94,.2);color:var(--ok)}
+.pill.armed{background:rgba(245,158,11,.2);color:var(--warn)}
+.pill.watch{background:rgba(56,189,248,.2);color:var(--accent)}
+.pill.filled{background:rgba(34,197,94,.2);color:var(--ok)}
+.pill.rejected{background:rgba(239,68,68,.2);color:var(--bad)}
+.pill.pending{background:rgba(245,158,11,.2);color:var(--warn)}
+.pill.buy{background:rgba(34,197,94,.2);color:var(--ok)}
+.pill.sell{background:rgba(239,68,68,.2);color:var(--bad)}
+.pill.submitted,.pill.acknowledged{background:rgba(56,189,248,.2);color:var(--accent)}
+.pill.partially-filled{background:rgba(245,158,11,.2);color:var(--warn)}
+.pill.closed{background:rgba(148,163,184,.18);color:var(--muted)}
+.pill.unknown,.pill.reconciliation-required{background:rgba(239,68,68,.18);color:#f87171}
+.pill.muted{background:rgba(148,163,184,.12);color:var(--muted)}
+.scroll-box{max-height:520px;overflow-y:auto}
+.scroll-box table{margin-top:0}
+.empty-state{text-align:center;padding:40px 20px;color:var(--muted)}
+.empty-state .icon{font-size:40px;margin-bottom:12px;opacity:.5}
+.diag-box{background:#0a1428;border:1px solid var(--border);border-radius:9px;padding:10px;font-family:monospace;font-size:11px;direction:ltr;text-align:left;max-height:200px;overflow:auto;margin-top:8px}
+</style>
+<script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+
+<div id="loginView" class="login">
+  <h1>ورود به FX-ARS</h1>
+  <div class="sub">سامانه تحلیل و پشتیبانی تصمیم</div>
+
+  <div style="display:flex;gap:8px;margin-bottom:16px">
+    <button type="button" id="roleAnalyst" class="role-btn active" onclick="selectRole('analyst')" style="flex:1">👤 تحلیل‌گر</button>
+    <button type="button" id="roleAdmin" class="role-btn" onclick="selectRole('admin')" style="flex:1">🛡️ مدیر</button>
+  </div>
+
+  <form id="loginForm" onsubmit="login(event)">
+    <label for="username">نام کاربری</label>
+    <input id="username" autocomplete="username" placeholder="نام کاربری">
+
+    <label for="password">رمز عبور</label>
+    <input id="password" type="password" autocomplete="current-password" placeholder="رمز عبور">
+
+    <div id="mfaGroup" class="hidden">
+      <label for="totp">کد MFA (۶ رقمی)</label>
+      <div class="row">
+        <input id="totp" inputmode="numeric" placeholder="123456" maxlength="6">
+        <button type="button" class="ghost" onclick="fetchDemoCode()">دریافت کد دمو</button>
+      </div>
+    </div>
+
+    <div style="margin-top:16px"><button id="loginButton" type="submit" style="width:100%">ورود</button></div>
+  </form>
+
+  <div id="loginError" role="alert"></div>
+
+  <div class="muted" id="demoHints" style="margin-top:14px;font-size:12px;line-height:1.9;border-top:1px solid var(--border);padding-top:12px;text-align:right">
+    <div><b>حساب‌های دمو (فقط localhost):</b></div>
+    <div>👤 تحلیل‌گر: <code>analyst</code></div>
+    <div>🛡️ مدیر: <code>admin</code> <span style="opacity:.7">(با MFA)</span></div>
+    <div style="opacity:.7">رمز عبور هنگام ساخت حساب توسط لانچر/CLI یک‌بار نمایش داده می‌شود و در کد ذخیره نمی‌شود.</div>
+  </div>
+</div>
+
+<div id="appView" class="hidden">
+  <header id="appHeader">
+    <h1>FX-ARS</h1>
+    <span class="badge clickable" id="phaseBadge" onclick="openPhaseModal()" title="تغییر حالت اجرا">فاز: —</span>
+    <span class="badge" id="killBadge">Kill Switch: —</span>
+    <span class="badge" id="configBadge" title="config hash">—</span>
+    <div class="spacer"></div>
+    <span class="muted" id="userLabel"></span>
+    <button class="ghost" onclick="loadAll()">🔄 به‌روزرسانی</button>
+    <button class="danger" onclick="logout()">خروج</button>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab" data-tab="summary">📊 خلاصه</button>
+    <button class="tab live-tab" data-tab="live-monitor">📡 مانیتور لایو <span class="live-pulse" id="liveTabPulse" style="display:none"></span></button>
+    <button class="tab" data-tab="chart">📈 نمودار</button>
+    <button class="tab" data-tab="analysis">🎯 تحلیل</button>
+    <button class="tab" data-tab="intelligence">🧠 هوش تصمیم</button>
+    <button class="tab" data-tab="scenarios">📋 سناریوها</button>
+    <button class="tab" data-tab="risk">🛡️ ریسک</button>
+    <button class="tab" data-tab="backtest">📊 بک‌تست</button>
+    <button class="tab" data-tab="trading">💼 معاملات</button>
+    <button class="tab" data-tab="performance">📈 عملکرد</button>
+    <button class="tab" data-tab="history">⬇️ دانلود</button>
+    <button class="tab" data-tab="ops">⚙️ عملیات</button>
+    <button class="tab" data-tab="telegram">🔔 نوتیفیکیشن</button>
+  </nav>
+
+  <main>
+    <section class="tab-panel" data-panel="summary">
+      <div class="grid-3">
+        <div class="stat"><div class="label">وضعیت</div><div class="value" id="statHealth">—</div></div>
+        <div class="stat"><div class="label">فاز</div><div class="value" id="statPhase">—</div></div>
+        <div class="stat"><div class="label">Kill Switch</div><div class="value" id="statKill">—</div></div>
+        <div class="stat"><div class="label">سناریو فعال</div><div class="value" id="statScenarioCount">—</div></div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="live-monitor">
+      <div class="live-header">
+        <div>
+          <h2>📡 مانیتور لایو سیگنال‌ها و معاملات</h2>
+          <div class="live-sub">پایش زنده سیگنال‌ها، پوزیشن‌های باز و سفارش‌های در انتظار</div>
+        </div>
+        <div class="live-actions">
+          <span class="live-indicator off" id="liveIndicator"><span class="dot"></span><span id="liveIndicatorText">غیرفعال</span></span>
+          <button class="live-btn" id="liveToggleBtn" onclick="toggleLiveMonitor()">▶️ شروع مانیتور</button>
+          <button class="ghost" onclick="refreshLiveNow()" title="دریافت فوری داده‌ها">🔄 بروزرسانی</button>
+          <button class="ghost" onclick="debugEndpoints()" title="بررسی وضعیت APIها">🔬 تشخیص</button>
+        </div>
+      </div>
+
+      <div id="liveAlert" class="alert hidden"></div>
+
+      <div class="live-meta">
+        <span>آخرین بروزرسانی: <b id="lvLastUpdate">—</b></span>
+        <span>منبع پوزیشن‌ها: <b id="lvPositionsSource" class="source-badge none">—</b></span>
+        <span>فاز اجرا: <b id="lvPhaseBadge" class="source-badge">—</b></span>
+        <span>بروکر: <b id="lvBrokerName">—</b></span>
+      </div>
+
+      <div class="grid-4" style="margin-bottom:16px">
+        <div class="stat live-stat"><div class="label">پوزیشن باز</div><div class="value" id="lvOpenPositions">—</div></div>
+        <div class="stat live-stat"><div class="label">سیگنال‌های فعال</div><div class="value" id="lvActiveSignals">—</div></div>
+        <div class="stat live-stat"><div class="label">آماده ورود (ARMED)</div><div class="value" id="lvArmedSignals">—</div></div>
+        <div class="stat live-stat"><div class="label">تریگر شده (TRIGGERED)</div><div class="value" id="lvTriggeredSignals">—</div></div>
+        <div class="stat live-stat"><div class="label">سود/زیان باز</div><div class="value" id="lvOpenPnl">—</div></div>
+      </div>
+
+      <div class="card live-card">
+        <h2>💼 پوزیشن‌های باز <span class="muted" id="lvPositionsCount"></span>
+          <span class="live-card-actions">
+            <button class="ghost" onclick="refreshPositionsOnly()" style="padding:4px 10px;font-size:11px">🔄 فقط پوزیشن‌ها</button>
+          </span>
+        </h2>
+        <div id="positionsDebug" class="muted" style="margin-bottom:8px;font-size:11px"></div>
+        <div class="scroll-box">
+          <table>
+            <thead><tr><th>تیکت</th><th>نماد</th><th>جهت</th><th class="num">حجم</th><th class="num">ورود</th><th class="num">قیمت فعلی</th><th class="num">سود/زیان</th><th>وضعیت</th><th>زمان</th></tr></thead>
+            <tbody id="livePositionsRows">
+              <tr><td colspan="9" class="empty-state"><div class="icon">💼</div><div>در حال دریافت پوزیشن‌ها...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card live-card">
+        <h2>🎯 سیگنال‌های فعال <span class="muted" id="lvSignalsCount"></span></h2>
+        <div class="scroll-box">
+          <table>
+            <thead>
+              <tr>
+                <th>زمان</th><th>نماد</th><th>TF</th><th>جهت</th><th>وضعیت</th><th class="num">امتیاز</th><th class="num">ورود</th><th class="num">SL</th><th class="num">TP1</th><th class="num">R:R</th>
+              </tr>
+            </thead>
+            <tbody id="liveSignalsRows">
+              <tr><td colspan="10" class="empty-state"><div class="icon">📡</div><div>برای دریافت سیگنال‌ها دکمه «بروزرسانی» یا «شروع مانیتور» را بزنید</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card live-card">
+        <h2>⏳ سفارش‌های در انتظار <span class="muted" id="lvPendingCount"></span></h2>
+        <div class="scroll-box">
+          <table>
+            <thead><tr><th>شناسه</th><th>نماد</th><th>نوع</th><th class="num">حجم</th><th class="num">قیمت</th><th>وضعیت</th></tr></thead>
+            <tbody id="livePendingRows">
+              <tr><td colspan="6" class="empty-state"><div class="icon">⏳</div><div>سفارشی در انتظار نیست</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>📜 آخرین رویدادها <button class="ghost" onclick="clearLiveEvents()" style="float:left">پاک‌سازی</button></h2>
+        <div id="liveEventsList" class="scroll-box" style="max-height:240px;font-size:12px;padding:8px;background:#0a1428;border-radius:9px">
+          <div class="empty-state">رویدادی ثبت نشده است</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="chart">
+      <div class="card">
+        <h2>📈 نمودار</h2>
+        <div class="chart-toolbar">
+          <div><label>نماد</label><select id="chartInstrument"></select></div>
+          <div><label>تایم‌فریم</label><select id="chartTimeframe"><option>M5</option><option>M15</option><option>M30</option><option selected>H1</option><option>H4</option><option>D1</option></select></div>
+          <div><label>تعداد</label><select id="chartLimit"><option>50</option><option selected>100</option><option>200</option></select></div>
+          <button onclick="loadChart()">بارگذاری</button>
+        </div>
+        <div id="chartContainer"></div>
+        <div id="rsiContainer"></div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="analysis">
+      <div class="card">
+        <h2>🎯 تحلیل دستی</h2>
+        <div class="row">
+          <div><label>نماد</label><select id="instrument"></select></div>
+          <div><label>تایم‌فریم</label><select id="timeframe"><option>H1</option><option>M15</option><option>H4</option><option>D1</option></select></div>
+          <button onclick="runAnalysis()">اجرا</button>
+        </div>
+        <div class="kv" id="marketSummary" style="margin-top:12px"></div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="scenarios">
+      <div class="card">
+        <h2>📋 سناریوهای سیستم <span class="muted" id="scenarioCount"></span></h2>
+        <table><thead><tr><th>شناسه</th><th>نماد</th><th>جهت</th><th>وضعیت</th><th>انقضا</th></tr></thead><tbody id="scenarioRows"></tbody></table>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="risk">
+      <div class="card">
+        <h2>🛡️ ارزیابی ریسک</h2>
+        <div class="grid-2">
+          <div>
+            <label>Equity (موجودی)</label><input id="equity" value="10000">
+            <label>سناریو</label><select id="riskScenario"><option value="">در حال بارگذاری...</option></select>
+            <div style="margin-top:12px"><button onclick="evaluateRisk()">ارزیابی ریسک سناریو</button></div>
+          </div>
+          <div id="riskResult" class="muted" style="padding:10px; background:var(--panel2); border-radius:9px;">نتیجه ارزیابی در اینجا نمایش داده می‌شود.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="intelligence">
+      <div class="grid-2">
+        <div class="card">
+          <h2>🔒 قفل ریسک</h2>
+          <div class="kv"><b>وضعیت</b><span id="rlState">—</span><b>آخرین به‌روزرسانی</b><span id="rlUpdated">—</span></div>
+          <div id="rlReasons" class="muted" style="margin:6px 0"></div>
+          <label>دلیل بازبینی/آزادسازی</label>
+          <input id="rlReason" placeholder="دلیل ثبت‌شده در Audit">
+          <div style="margin-top:8px;display:flex;gap:6px">
+            <button class="ghost" onclick="setRiskLock(false)">بازبینی دستی</button>
+            <button class="ghost" onclick="setRiskLock(true)">آزادسازی</button>
+          </div>
+        </div>
+        <div class="card">
+          <h2>🛑 Kill Switch (سه سطح)</h2>
+          <div id="ksScopes" class="muted">در حال بارگذاری...</div>
+          <div class="row" style="margin-top:8px">
+            <div><label>سطح</label><select id="ksScope"><option>SYSTEM</option><option>MODULE</option><option>ACCOUNT</option></select></div>
+            <div><label>هدف</label><input id="ksTarget" placeholder="نام ماژول/شناسه حساب"></div>
+            <div><label>دلیل</label><input id="ksReason"></div>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:6px">
+            <button class="danger" onclick="setScopedKill(true)">فعال‌سازی</button>
+            <button class="ghost" onclick="setScopedKill(false)">غیرفعال‌سازی</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🌡️ نقشه حرارتی سناریوها <span class="muted" id="hmCount"></span></h2>
+        <table><thead><tr><th>نماد</th><th>TF</th><th class="num">LONG</th><th class="num">SHORT</th><th class="num">میانگین قدرت</th><th>نزدیک‌ترین انقضا</th><th>تراکم</th></tr></thead><tbody id="hmRows"></tbody></table>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>📓 دفتر تصمیم</h2>
+          <div class="row">
+            <div><label>نوع</label><select id="jnKind"><option>NOTE</option><option>HYPOTHESIS</option><option>OUTCOME</option><option>REVIEW</option><option>LESSON</option></select></div>
+            <div><label>Run ID</label><input id="jnRun" placeholder="اختیاری"></div>
+            <div><label>Scenario ID</label><input id="jnScenario" placeholder="اختیاری"></div>
+          </div>
+          <label>متن</label><textarea id="jnBody" rows="2" style="width:100%"></textarea>
+          <div style="margin-top:8px"><button onclick="addJournal()">ثبت یادداشت</button></div>
+          <div id="jnList" class="scroll-box" style="margin-top:10px;max-height:220px"></div>
+        </div>
+        <div class="card">
+          <h2>🔍 پیش‌مرگ و بازپخش</h2>
+          <div class="row">
+            <div><label>Run ID</label><input id="pmRun"></div>
+            <div><button class="ghost" onclick="loadPremortem()">پیش‌مرگ</button></div>
+          </div>
+          <div id="pmResult" class="muted" style="margin-bottom:10px">—</div>
+          <div class="row">
+            <div><label>Scenario ID</label><input id="cfScenario"></div>
+            <div><button class="ghost" onclick="loadCounterfactual()">بازپخش خلاف واقع</button></div>
+          </div>
+          <div id="cfResult" class="muted">—</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>🧾 منشأ تصمیم (Provenance)</h2>
+          <div class="row"><div><label>Run ID</label><input id="pvRun"></div><div><button class="ghost" onclick="loadProvenance()">بررسی زنجیره</button></div></div>
+          <div id="pvResult" class="muted">—</div>
+        </div>
+        <div class="card">
+          <h2>⚔️ چالش سناریو</h2>
+          <div class="row">
+            <div><label>Scenario ID</label><input id="chScenario"></div>
+            <div><label>شدت</label><select id="chSeverity"><option>LOW</option><option selected>MEDIUM</option><option>HIGH</option></select></div>
+          </div>
+          <label>فرضیه مخالف</label><textarea id="chThesis" rows="2" style="width:100%"></textarea>
+          <div style="margin-top:8px;display:flex;gap:6px">
+            <button onclick="addChallenge()">ثبت چالش</button>
+            <button class="ghost" onclick="loadChallenges()">نمایش</button>
+          </div>
+          <div id="chList" class="scroll-box" style="margin-top:10px;max-height:180px"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>📜 سیاست‌ها و مدل‌ها</h2>
+        <div id="govPolicies" class="muted">در حال بارگذاری...</div>
+        <div id="govModels" class="muted" style="margin-top:10px"></div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="backtest">
+      <div class="card">
+        <h2>📊 بک‌تست</h2>
+        <div class="row">
+          <div><label>نماد</label><select id="btInstrument"></select></div>
+          <button onclick="runBacktest()">اجرا</button>
+        </div>
+        <div id="btResult" style="margin-top:12px" class="muted">—</div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="trading">
+      <div class="grid-2">
+        <div class="card">
+          <h2>📡 وضعیت بروکر</h2>
+          <div id="brokerStatus" class="muted">برای بارگذاری دکمه بزنید</div>
+          <button onclick="loadBrokerStatus()" style="margin-top:8px">بروزرسانی</button>
+        </div>
+        <div class="card">
+          <h2>🔧 تنظیمات</h2>
+          <div class="kv"><b>فاز</b><span id="tradingPhase">—</span><b>اجرای سفارش</b><span id="tradingEnabled">—</span><b>Kill Switch</b><span id="tradingKill">—</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>⚙️ تنظیمات هوشمند معاملات
+          <span style="float:left">
+            <button class="ghost" onclick="loadTradingSettings()" style="padding:4px 10px;font-size:11px">🔄 بازخوانی</button>
+          </span>
+        </h2>
+        <p class="muted" style="margin-top:0">پیش‌فرض‌ها از روی سرمایه حساب محاسبه می‌شوند و همهٔ مقادیر قابل ویرایش‌اند. اگر مقداری از پیشنهاد سیاست بیرون باشد، ذخیره فقط پس از نمایش هشدار و تأیید شما انجام می‌شود؛ موتور ریسک همچنان سقف‌های سخت خود را مستقل اعمال می‌کند.</p>
+        <div class="row" style="align-items:end">
+          <div><label>سرمایه حساب (USD)</label><input id="tsEquity" type="number" min="1" step="1" value="100"></div>
+          <div><label>پروفایل پیشنهادی</label><input id="tsProfile" readonly></div>
+          <button class="ghost" onclick="refreshTradingRecommendation()">🧠 محاسبه پیشنهاد</button>
+          <button class="ghost" onclick="applySmartTradingDefaults()">✨ اعمال پیشنهاد هوشمند</button>
+        </div>
+        <div id="tsWarnings" class="muted" style="margin-top:8px">—</div>
+
+        <div class="grid-3" style="margin-top:12px">
+          <div><label>تایم‌فریم‌ها</label><div id="tsTimeframes" style="display:flex;gap:14px;flex-wrap:wrap;padding-top:6px"></div></div>
+          <div><label>حداکثر لات هر سفارش</label><input id="tsMaxLot" type="number" min="0.01" step="0.01"></div>
+          <div><label>حداکثر پوزیشن باز</label><input id="tsMaxPositions" type="number" min="1" step="1"></div>
+          <div><label>حداکثر معاملات روزانه</label><input id="tsMaxDaily" type="number" min="1" step="1"></div>
+          <div><label>ریسک هر معامله (%)</label><input id="tsRiskPct" type="number" min="0.05" step="0.05"></div>
+          <div><label>سقف زیان روزانه (%)</label><input id="tsDailyLossPct" type="number" min="0.1" step="0.1"></div>
+          <div><label>حد توقف افت سرمایه (%)</label><input id="tsDrawdownPct" type="number" min="0.1" step="0.1"></div>
+          <div><label>حداکثر اسپرد (پیپ)</label><input id="tsSpread" type="number" min="0.1" step="0.1"></div>
+          <div><label>نمادهای مجاز (چندانتخابی)</label><select id="tsInstruments" multiple style="height:104px;width:100%"></select></div>
+        </div>
+
+        <div class="muted" id="tsPolicyHint" style="margin-top:10px">—</div>
+        <div class="muted" style="margin-top:12px">🔢 پله‌های حجم (تقریبی، از روی سرمایه و ریسک فعلی):</div>
+        <table style="margin-top:6px">
+          <thead><tr><th>فاصله حد ضرر (پیپ)</th><th class="num">حجم پیشنهادی (لات)</th><th class="num">ریسک تقریبی (USD)</th><th>وضعیت</th></tr></thead>
+          <tbody id="tsLadderRows"><tr><td colspan="4" class="muted">—</td></tr></tbody>
+        </table>
+
+        <div class="row" style="margin-top:14px">
+          <button onclick="saveTradingSettings()">💾 ذخیره و اعمال</button>
+          <button class="ghost" onclick="loadTradingSettings()">↩️ بازگردانی از فایل</button>
+        </div>
+        <div id="tsStatus" class="muted" style="margin-top:10px">—</div>
+      </div>
+
+      <div class="card">
+        <h2>🎯 انتخاب استراتژی خودکار</h2>
+        <div class="row">
+          <div><label>نماد</label><select id="stratInstrument"></select></div>
+          <div>
+            <label>استراتژی</label>
+            <select id="stratStrategy" onchange="onStrategySelectChanged()">
+              <option value="">خودکار (بهترین امتیاز)</option>
+              <option value="EMA20/FullBody">EMA20 + کندل فول‌بادی (M5)</option>
+              <option value="H&S/Reversal">سر و شانه بازگشتی (M5)</option>
+            </select>
+          </div>
+          <div><label>تایم‌فریم</label><select id="stratTimeframe"><option>M5</option><option>M15</option><option selected>H1</option><option>H4</option><option>D1</option></select></div>
+          <div><label>تعداد کندل</label><input id="stratBars" type="number" value="2000"></div>
+          <button onclick="analyzeStrategies()">🔍 تحلیل استراتژی‌ها</button>
+        </div>
+        <div class="muted" id="stratModeHint" style="margin-top:10px">—</div>
+        <div id="stratResult" style="margin-top:12px" class="muted">—</div>
+      </div>
+
+      <div class="card" style="background: rgba(56,189,248,.1); border-color: #38bdf8;">
+        <h2>🤖 حالت معاملات رباتیک</h2>
+        <div class="row" style="align-items: center;">
+          <label style="margin:0; font-size:14px; color:#fff;">
+            <input type="checkbox" id="autoTradeToggle" onchange="toggleAutoTrade(this.checked)" style="width:20px; height:20px; vertical-align:middle; margin-left:8px;">
+            فعال‌سازی ارسال خودکار سفارشات
+          </label>
+        </div>
+        <div class="muted" style="margin-top:8px;">در صورت فعال بودن، سیستم به محض پیدا کردن سیگنال معتبر، خودش سفارش را ارسال می‌کند.</div>
+      </div>
+
+      <div class="card">
+        <h2>🚀 ارسال دستی (چند نماد)</h2>
+        <div class="row">
+          <div>
+            <label>نمادهای مورد نظر (Ctrl برای چندانتخابی)</label>
+            <select id="multiStratInstrument" multiple style="height:150px; width:100%; padding:5px;"></select>
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <button onclick="tradeMultiWithStrategy()" class="danger">⚠️ ارسال سفارش برای نمادهای انتخاب شده</button>
+        </div>
+        <div id="autoTradeResult" style="margin-top:12px" class="muted">—</div>
+      </div>
+
+      <div class="card">
+        <h2>📋 تاریخچه سفارش‌ها <button class="ghost" onclick="loadOrders()" style="float:left">بروزرسانی</button></h2>
+        <table><thead><tr><th>شناسه</th><th>نماد</th><th>جهت</th><th>حجم</th><th>وضعیت</th><th>زمان</th></tr></thead><tbody id="ordersRows"><tr><td colspan="6" class="muted">—</td></tr></tbody></table>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="performance">
+      <div class="card">
+        <h2>📈 عملکرد معاملات بسته‌شده
+          <span style="float:left">
+            <button class="ghost" onclick="loadPerformance()" style="padding:4px 10px;font-size:11px">🔄 بروزرسانی</button>
+          </span>
+        </h2>
+        <div class="muted" id="perfMeta">در حال بارگذاری...</div>
+        <div class="grid-3" style="margin-top:12px">
+          <div class="stat"><div class="label">سود خالص (USD)</div><div class="value" id="perfNet">—</div></div>
+          <div class="stat"><div class="label">نرخ برد</div><div class="value" id="perfWinRate">—</div></div>
+          <div class="stat"><div class="label">تعداد معامله</div><div class="value" id="perfTrades">—</div></div>
+          <div class="stat"><div class="label">Profit Factor</div><div class="value" id="perfPf">—</div></div>
+          <div class="stat"><div class="label">Expectancy (USD)</div><div class="value" id="perfExp">—</div></div>
+          <div class="stat"><div class="label">میانگین R</div><div class="value" id="perfR">—</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🧭 انتساب عملکرد</h2>
+        <div class="row">
+          <div>
+            <label>بُعد</label>
+            <select id="perfDimension" onchange="renderAttribution()">
+              <option value="instrument">نماد</option>
+              <option value="side">جهت</option>
+              <option value="regime">رژیم بازار</option>
+              <option value="timeframe">تایم‌فریم</option>
+              <option value="strategy">استراتژی</option>
+              <option value="scenario">سناریو</option>
+              <option value="module">ماژول شاهد</option>
+            </select>
+          </div>
+        </div>
+        <div class="scroll-box" style="margin-top:12px">
+          <table>
+            <thead><tr><th>کلید</th><th class="num">معامله</th><th class="num">نرخ برد</th><th class="num">سود خالص</th><th class="num">سهم</th></tr></thead>
+            <tbody id="attributionRows">
+              <tr><td colspan="5" class="empty-state"><div class="icon">🧭</div><div>در حال بارگذاری...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🧾 معاملات بسته‌شده <span class="muted" id="closedTradesCount"></span></h2>
+        <div class="scroll-box">
+          <table>
+            <thead><tr><th>بسته‌شدن</th><th>نماد</th><th>جهت</th><th class="num">حجم</th><th class="num">ورود</th><th class="num">خروج</th><th class="num">سود خالص</th><th class="num">R</th><th>سناریو</th></tr></thead>
+            <tbody id="closedTradesRows">
+              <tr><td colspan="9" class="empty-state"><div class="icon">🧾</div><div>در حال بارگذاری...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="history">
+      <div class="card">
+        <h2>⬇️ دانلود از MT5 <span class="muted" id="histStatus"></span></h2>
+        <div class="grid-2">
+          <div>
+            <label>نمادها (<span id="histInstrumentsCount">0</span>) <button class="ghost" onclick="selectAllInstruments(true)" style="padding:2px">همه</button> <button class="ghost" onclick="selectAllInstruments(false)" style="padding:2px">هیچ</button></label>
+            <div id="histInstrumentsBox" class="checkbox-list">...</div>
+          </div>
+          <div>
+            <label>تایم‌فریم‌ها (<span id="histTfsCount">0</span>) <button class="ghost" onclick="selectAllTfs(true)" style="padding:2px">همه</button> <button class="ghost" onclick="selectAllTfs(false)" style="padding:2px">هیچ</button></label>
+            <div id="histTfsBox" class="checkbox-list"></div>
+            <label>تعداد کندل</label><input id="histBars" type="number" value="5000">
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button onclick="downloadHistory()" id="histDownloadBtn">⬇️ دانلود</button>
+          <button class="ghost" onclick="loadHistoryFiles()">📂 فهرست</button>
+        </div>
+        <div id="historyResult" style="margin-top:12px" class="muted">—</div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="ops">
+      <div class="grid-2">
+        <div class="card"><h2>🔍 سلامت سیستم</h2><div class="kv" id="healthBox"><span class="muted">در حال بررسی...</span></div></div>
+        <div class="card">
+          <h2>🚨 Kill Switch (توقف اضطراری)</h2>
+          <div class="kv"><b>وضعیت</b><span id="killStateText">—</span><b>دلیل</b><span id="killStateReason">—</span></div>
+          <div class="row" style="margin-top:8px">
+            <input id="killReason" placeholder="دلیل فعال/غیرفعال‌سازی...">
+            <button class="danger" onclick="toggleKill(true)">فعال‌سازی</button>
+            <button class="ghost" onclick="toggleKill(false)">غیرفعال‌سازی</button>
+          </div>
+          <div class="muted" id="killHint" style="margin-top:8px">—</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="telegram">
+      <div class="card">
+        <h2>🔔 تنظیمات نوتیفیکیشن</h2>
+        <p class="muted">کانال‌های دریافت سیگنال را انتخاب کنید. تغییرات در <code>data/telegram.json</code> ذخیره می‌شود.</p>
+      </div>
+
+      <div class="card">
+        <h2>📱 تلگرام</h2>
+        <label>Bot Token</label>
+        <input type="password" id="tgToken" placeholder="123456789:ABCdef..." autocomplete="off">
+        <label>Chat ID</label>
+        <input type="text" id="tgChatId" placeholder="123456789" autocomplete="off">
+        <label style="display:flex;align-items:center;gap:8px;margin-top:12px">
+          <input type="checkbox" id="tgEnabled" style="width:auto"> فعال‌سازی ارسال تلگرام
+        </label>
+        <div class="row" style="margin-top:16px">
+          <button class="ghost" onclick="testTelegram()">📤 ارسال پیام تست</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🖥️ نوتیف دسکتاپ (ویندوز)</h2>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <input type="checkbox" id="desktopEnabled" style="width:auto"> فعال‌سازی نوتیف دسکتاپ ویندوز
+        </label>
+        <div class="row" style="margin-top:16px">
+          <button class="ghost" onclick="testDesktop()">🖥️ تست نوتیف دسکتاپ</button>
+        </div>
+        <div class="muted" id="desktopBackend" style="margin-top:8px">backend: —</div>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <button onclick="saveTelegram()">💾 ذخیره</button>
+          <button class="ghost" onclick="loadTelegramSettings()">🔄 بازخوانی</button>
+        </div>
+        <div id="tgStatus" class="muted" style="margin-top:12px">—</div>
+      </div>
+    </section>
+  </main>
+
+  <div id="phaseModal" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <h2 style="margin:0 0 4px;color:var(--accent)">🎛️ انتخاب حالت اجرا</h2>
+      <p class="muted" style="margin:0 0 16px;font-size:12px">حالت فعلی: <b id="phaseCurrent">—</b></p>
+
+      <div id="modeAdvisor" class="mode-option" onclick="selectMode('ADVISOR')">
+        <h3>👤 مشاور تریدر (ADVISOR)</h3>
+        <p>تحلیل، سناریو، حجم پیشنهادی و هشدار. هیچ سفارشی ارسال نمی‌شود.</p>
+      </div>
+
+      <div id="modeRobot" class="mode-option" onclick="selectMode('AUTOMATED_LIMITED')">
+        <h3>🤖 ربات معامله‌گر (AUTOMATED_LIMITED)</h3>
+        <p>ارسال سفارش با سقف‌های تعریف‌شده در «تنظیمات هوشمند معاملات»؛ پیش‌فرض‌ها از روی سرمایه حساب محاسبه می‌شوند و قابل ویرایش‌اند.</p>
+      </div>
+
+      <div id="robotConfirm" class="hidden">
+        <div class="warn-box">⚠️ برای فعال‌سازی ربات، عبارت <b>ENABLE ROBOT</b> را تایپ کنید.</div>
+        <input id="robotConfirmInput" type="text" placeholder="ENABLE ROBOT" autocomplete="off">
+      </div>
+
+      <div class="row" style="margin-top:20px">
+        <button class="ghost" onclick="closePhaseModal()">انصراف</button>
+        <button id="phaseSaveBtn" onclick="savePhase()">اعمال</button>
+      </div>
+      <div id="phaseError" class="muted" style="color:#f87171;margin-top:10px;min-height:16px"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="status"></div>
+
+<script>
+'use strict';
+
+// ==================== Utilities ====================
+const $ = (id) => document.getElementById(id);
+const state = {
+  token: localStorage.getItem("fxars_token") || "",
+  user: null,
+  meta: null,
+  isLocalhost: ["localhost", "127.0.0.1"].includes(location.hostname),
+};
+
+const chartState = { chart: null, rsiChart: null, loading: false };
+
+const tradingState = { data: null, recommendation: null, loading: false };
+
+const liveState = {
+  running: false,
+  timer: null,
+  abort: null,
+  busy: false,
+  lastSignals: new Set(),
+  events: [],
+  intervalMs: 5000,
+  ticks: 0,
+  lastPositionsRaw: null,
+  lastUpdate: null,
+  positionOutcome: { warnings: [], kind: "info" },
+};
+
+function toast(message, ok) {
+  const el = $("toast");
+  el.textContent = message;
+  el.style.borderColor = ok ? "#166534" : "#991b1b";
+  el.classList.add("show");
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove("show"), 3500);
+}
+
+function esc(v) {
+  return String(v === null || v === undefined ? "" : v).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function fmtTime(iso) {
+  if (iso === null || iso === undefined) return "—";
+  try {
+    let t = iso;
+    if (typeof t === "number" || /^\d+$/.test(String(t))) {
+      let n = Number(t);
+      if (n < 1e12) n *= 1000;
+      return new Date(n).toLocaleTimeString("fa-IR");
+    }
+    return new Date(t).toLocaleTimeString("fa-IR");
+  } catch { return String(iso); }
+}
+
+function pill(text, cls) {
+  return `<span class="pill ${esc(cls)}">${esc(text)}</span>`;
+}
+
+function renderTable(tbodyId, rows, emptyCols, emptyMsg, emptyIcon) {
+  const tbody = $(tbodyId);
+  if (!tbody) return;
+  if (!rows || rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="${emptyCols}" class="empty-state"><div class="icon">${emptyIcon || "📭"}</div><div>${esc(emptyMsg)}</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.join("");
+}
+
+// ==================== NORMALIZER ====================
+function extractPositionsArray(payload) {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+  const candidates = [
+    payload.items, payload.positions, payload.open_positions,
+    payload.data, payload.result, payload.rows,
+    payload.data?.items, payload.data?.positions,
+    payload.account?.positions, payload.account?.open_positions,
+  ];
+  for (const c of candidates) if (Array.isArray(c)) return c;
+  return [];
+}
+
+function normalizePosition(p) {
+  if (!p || typeof p !== "object") return null;
+  const ticket = p.ticket ?? p.position_id ?? p.positionId ?? p.id ?? "—";
+  const symbol = p.symbol ?? p.instrument ?? p.instrument_id ?? "—";
+  let rawType = p.type ?? p.side ?? p.direction ?? "";
+  let dirLabel = "—", dirCls = "muted";
+  const typeStr = String(rawType).toUpperCase();
+  if (rawType === 0 || typeStr === "BUY" || typeStr === "LONG" || typeStr === "0") {
+    dirLabel = "BUY"; dirCls = "buy";
+  } else if (rawType === 1 || typeStr === "SELL" || typeStr === "SHORT" || typeStr === "1") {
+    dirLabel = "SELL"; dirCls = "sell";
+  } else if (typeStr) {
+    dirLabel = typeStr; dirCls = "muted";
+  }
+  const volume = p.volume ?? p.lots ?? null;
+  const priceOpen = p.price_open ?? p.open_price ?? p.entry ?? null;
+  const priceCurrent = p.price_current ?? p.current_price ?? null;
+  let pnl = null;
+  for (const s of [p.profit, p.pnl, p.unrealized_pnl]) {
+    if (s !== null && s !== undefined && s !== "") { pnl = Number(s); break; }
+  }
+  if (!Number.isFinite(pnl)) pnl = null;
+  const status = p.status ? String(p.status) : "";
+  const time = p.time ?? p.opened_at ?? null;
+  return {
+    ticket, symbol,
+    timeframe: p.price_timeframe ?? p.timeframe ?? null,
+    dirLabel, dirCls,
+    volumeText: fmtVolume(volume),
+    openText: fmtPrice(priceOpen),
+    currentText: fmtPrice(priceCurrent),
+    pnl,
+    pnlText: fmtPnlText(pnl),
+    pnlCls: pnl == null ? "muted" : (pnl >= 0 ? "pos" : "neg"),
+    status,
+    statusCls: status ? status.toLowerCase().replace(/_/g, "-") : "muted",
+    time,
+  };
+}
+
+function toNum(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmtPrice(v) {
+  const n = toNum(v);
+  if (n === null) return esc(v === null || v === undefined ? "—" : v);
+  return n.toFixed(5).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function fmtVolume(v) {
+  const n = toNum(v);
+  if (n === null) return esc(v === null || v === undefined ? "—" : v);
+  return n.toFixed(2);
+}
+
+function fmtPnlText(v) {
+  return v === null || v === undefined ? "—" : (v >= 0 ? "+" : "") + Number(v).toFixed(2);
+}
+
+// ==================== API ====================
+async function api(path, options = {}) {
+  const headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
+  if (state.token) headers["Authorization"] = "Bearer " + state.token;
+  if ((options.method || "GET") === "POST") {
+    try {
+      headers["Idempotency-Key"] = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    } catch { headers["Idempotency-Key"] = `${Date.now()}-${Math.random()}`; }
+  }
+  const response = await fetch(path, Object.assign({}, options, { headers }));
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+  if (!response.ok) {
+    const message = (data && data.error && data.error.message) || ("HTTP " + response.status);
+    if (response.status === 401 && !path.includes("/auth/login")) logout(false);
+    throw new Error(message);
+  }
+  return data;
+}
+
+// ==================== Tab Management ====================
+function initTabs() {
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const name = tab.dataset.tab;
+      document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t === tab));
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.dataset.panel === name));
+      onTabEnter(name);
+    });
+  });
+}
+
+function onTabEnter(name) {
+  if (name === "live-monitor") {
+    refreshLiveNow().catch(() => {});
+    if (liveState.running && !liveState.timer) startLivePolling();
+  }
+  if (name === "telegram") loadTelegramSettings().catch(() => {});
+  if (name === "risk") loadRiskScenarios().catch(() => {});
+  if (name === "ops") loadHealth().catch(() => {});
+  if (name === "trading") { loadBrokerStatus(); loadOrders(); loadAutoTradeStatus(); }
+  if (name === "performance") loadPerformance().catch(() => {});
+  if (name === "history") loadHistoryCheckboxes().catch(() => {});
+  if (name === "scenarios") loadScenarios().catch(() => {});
+  if (name === "intelligence") loadIntelligence().catch(() => {});
+}
+
+// ==================== Auth ====================
+const ROLE_PRESETS = {
+  analyst: { username: "analyst", mfa: false },
+  admin:   { username: "admin",   mfa: true  },
+};
+
+function selectRole(role) {
+  $("loginError").textContent = "";
+  if (!state.isLocalhost) {
+    $("mfaGroup").classList.toggle("hidden", role !== "admin");
+    $("roleAnalyst").classList.toggle("active", role === "analyst");
+    $("roleAdmin").classList.toggle("active", role === "admin");
+    return;
+  }
+  const preset = ROLE_PRESETS[role] || ROLE_PRESETS.analyst;
+  $("username").value = preset.username;
+  $("password").value = "";
+  $("totp").value = "";
+  setTimeout(() => $("password").focus(), 100);
+
+  if (preset.mfa) {
+    $("mfaGroup").classList.remove("hidden");
+  } else {
+    $("mfaGroup").classList.add("hidden");
+  }
+  $("roleAnalyst").classList.toggle("active", role === "analyst");
+  $("roleAdmin").classList.toggle("active", role === "admin");
+}
+
+async function login(event) {
+  if (event) event.preventDefault();
+  const button = $("loginButton");
+  button.disabled = true;
+  $("loginError").textContent = "";
+  const body = { username: $("username").value.trim(), password: $("password").value };
+  if ($("totp").value.trim()) body.totp_code = $("totp").value.trim();
+  try {
+    const data = await api("/api/v1/auth/login", { method: "POST", body: JSON.stringify(body) });
+    state.token = data.token;
+    state.user = data.user;
+    localStorage.setItem("fxars_token", data.token);
+    showApp();
+    await loadAll();
+    toast("خوش آمدید " + data.user.username, true);
+  } catch (error) {
+    $("loginError").textContent = error.message;
+    button.disabled = false;
+  }
+}
+
+async function fetchDemoCode() {
+  try {
+    const data = await api("/api/v1/auth/demo-totp?username=admin");
+    $("totp").value = data.code;
+    toast("کد MFA دریافت شد (تا " + data.expires_in + " ثانیه)", true);
+  } catch (error) {
+    $("loginError").textContent = error.message;
+  }
+}
+
+function showApp() {
+  $("loginView").classList.add("hidden");
+  $("appView").classList.remove("hidden");
+  $("appHeader").classList.remove("hidden");
+}
+
+function logout(reload = true) {
+  if (state.token) {
+    fetch("/api/v1/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + state.token } }).catch(() => {});
+  }
+  stopLivePolling();
+  liveState.running = false;
+  state.token = "";
+  state.user = null;
+  localStorage.removeItem("fxars_token");
+
+  $("appView").classList.add("hidden");
+  $("loginView").classList.remove("hidden");
+  $("password").value = "";
+  $("totp").value = "";
+  selectRole("analyst");
+
+  if (reload) {
+    window.location.reload();
+  }
+}
+
+// ==================== Load All ====================
+async function loadAll() {
+  if (!state.token) { logout(false); return; }
+  try {
+    const me = await api("/api/v1/auth/me");
+    state.user = me.user;
+    $("userLabel").textContent = me.user.username + " (" + me.user.role + ")";
+
+    const meta = await api("/api/v1/meta");
+    state.meta = meta;
+    $("phaseBadge").textContent = "فاز: " + meta.phase;
+    $("killBadge").textContent = "Kill Switch: " + (meta.killswitch.active ? "فعال" : "غیرفعال");
+    $("killBadge").className = "badge " + (meta.killswitch.active ? "bad" : "ok");
+    $("configBadge").textContent = "Config: " + (meta.config_hash || "").slice(0, 8);
+
+    const instruments = await api("/api/v1/instruments");
+    const items = instruments.items || [];
+    state.instrumentIds = items.map(i => i.instrument_id).filter(id => !String(id).toUpperCase().endsWith("DXY"));
+    const options = items.map(i => `<option>${esc(i.instrument_id)}</option>`).join("");
+
+    ["instrument", "btInstrument", "chartInstrument", "stratInstrument", "multiStratInstrument"]
+      .forEach(id => { const el = $(id); if (el) el.innerHTML = options; });
+
+    $("statPhase").textContent = meta.phase;
+    $("statKill").textContent = meta.killswitch.active ? "فعال" : "غیرفعال";
+    $("statKill").className = "value " + (meta.killswitch.active ? "neg" : "pos");
+    $("statHealth").textContent = "آماده";
+    $("statHealth").className = "value pos";
+
+    showApp();
+    loadAutoTradeStatus().catch(() => {});
+    refreshKillState().catch(() => {});
+  } catch (error) {
+    toast(error.message, false);
+    $("loginError").textContent = error.message;
+  }
+}
+
+// ==================== DECISION INTELLIGENCE ====================
+const intelState = { loaded: false };
+
+async function loadIntelligence(force = false) {
+  if (intelState.loaded && !force) return;
+  intelState.loaded = true;
+  const tasks = [
+    api("/api/v1/risk/lock").then(d => renderRiskLock(d.risk_lock)).catch(() => {}),
+    api("/api/v1/killswitch").then(d => {
+      renderKsScopes(d.scopes || []);
+      renderKillSwitchStatus(d.killswitch || {});
+    }).catch(() => {}),
+    api("/api/v1/intelligence/heatmap").then(d => renderHeatmap(d)).catch(() => {}),
+    api("/api/v1/intelligence/journal?limit=30").then(d => renderJournal(d.items || [])).catch(() => {}),
+    api("/api/v1/governance/policies?limit=20").then(d => renderPolicies(d.items || [])).catch(() => {}),
+    api("/api/v1/governance/models").then(d => renderModels(d.items || [])).catch(() => {}),
+  ];
+  await Promise.all(tasks);
+}
+
+function renderRiskLock(lock) {
+  if (!lock) return;
+  const state = lock.state || "NORMAL";
+  $("rlState").textContent = state;
+  $("rlState").className = ["NORMAL", "WARNING"].includes(state) ? "pos" : "neg";
+  $("rlUpdated").textContent = fmtDate(lock.updated_at);
+  $("rlReasons").textContent = (lock.reasons || []).join(" | ");
+}
+
+function renderKsScopes(items) {
+  if (!items.length) { $("ksScopes").textContent = "سطری ثبت نشده است."; return; }
+  $("ksScopes").innerHTML = items.map(item => {
+    const cls = item.active ? "neg" : "pos";
+    return `<div class="kv"><b>${esc(item.key || item.scope || "SYSTEM")}</b><span class="${cls}">${item.active ? "فعال" : "غیرفعال"}</span><span class="muted">${esc(item.reason || "")}</span></div>`;
+  }).join("");
+}
+
+function renderKillSwitchStatus(data) {
+  const active = !!data.active;
+  if ($("killStateText")) {
+    $("killStateText").textContent = active ? "فعال" : "غیرفعال";
+    $("killStateText").className = active ? "neg" : "pos";
+  }
+  if ($("killStateReason")) {
+    $("killStateReason").textContent = active ? (data.reason || "—") : "—";
+  }
+  if ($("tradingKill")) {
+    $("tradingKill").textContent = active ? "فعال (سفارش‌ها مسدود)" : "غیرفعال";
+    $("tradingKill").className = active ? "neg" : "pos";
+  }
+  if ($("killHint")) {
+    $("killHint").textContent = active
+      ? "ارسال سفارش‌ها متوقف است؛ برای ادامهٔ معاملات دکمهٔ «غیرفعال‌سازی» را بزنید."
+      : "ارسال سفارش‌ها مجاز است.";
+  }
+}
+
+async function refreshKillState() {
+  const [meta, ks] = await Promise.all([
+    api("/api/v1/meta").catch(() => null),
+    api("/api/v1/killswitch").catch(() => null),
+  ]);
+  if (meta) {
+    $("killBadge").textContent = "Kill Switch: " + (meta.killswitch.active ? "فعال" : "غیرفعال");
+    $("killBadge").className = "badge " + (meta.killswitch.active ? "bad" : "ok");
+    $("statKill").textContent = meta.killswitch.active ? "فعال" : "غیرفعال";
+    $("statKill").className = "value " + (meta.killswitch.active ? "neg" : "pos");
+  }
+  if (ks) {
+    renderKillSwitchStatus(ks.killswitch || {});
+    renderKsScopes(ks.scopes || []);
+  }
+}
+
+function renderHeatmap(data) {
+  const rows = data.rows || [];
+  $("hmCount").textContent = "(" + (data.total || 0) + " سناریو زنده)";
+  $("hmRows").innerHTML = rows.length ? rows.map(row => {
+    const crowdCls = row.crowding === "CROWDED" ? "neg" : (row.crowding === "STACKED" ? "warn" : "muted");
+    return `<tr><td>${esc(row.instrument_id)}</td><td>${esc(row.timeframe)}</td><td class="num">${row.LONG}</td><td class="num">${row.SHORT}</td><td class="num">${fmtNumText(row.avg_strength, 2)}</td><td>${fmtDate(row.nearest_expiry)}</td><td class="${crowdCls}">${esc(row.crowding)}</td></tr>`;
+  }).join("") : `<tr><td colspan="7" class="empty-state">سناریوی زنده‌ای وجود ندارد</td></tr>`;
+}
+
+function renderJournal(items) {
+  $("jnList").innerHTML = items.length ? items.map(item => {
+    return `<div style="padding:6px;border-bottom:1px solid var(--border)"><b>${esc(item.kind)}</b> <span class="muted">${fmtDate(item.created_at)} · ${esc(item.actor)}</span><div>${esc(item.body)}</div></div>`;
+  }).join("") : `<div class="muted">یادداشتی ثبت نشده است</div>`;
+}
+
+function renderPolicies(items) {
+  $("govPolicies").innerHTML = items.length ? items.map(item => {
+    return `<div class="kv"><b>${esc(item.kind)}</b><span>${esc(item.version)}</span><span class="${item.status === "ACTIVE" ? "pos" : "muted"}">${esc(item.status)}</span><span class="muted">${esc((item.content_hash || "").slice(0, 12))}</span></div>`;
+  }).join("") : `<div class="muted">سیاستی ثبت نشده است</div>`;
+}
+
+function renderModels(items) {
+  $("govModels").innerHTML = items.length ? items.map(card => {
+    return `<div class="kv"><b>${esc(card.model_id)}@${esc(card.version)}</b><span>Tier ${card.tier}</span><span class="${card.status === "ACTIVE" ? "pos" : "muted"}">${esc(card.status)}</span></div>`;
+  }).join("") : `<div class="muted">مدلی ثبت نشده است</div>`;
+}
+
+async function setRiskLock(release) {
+  const reason = $("rlReason").value.trim();
+  if (!reason) { toast("دلیل بازبینی ریسک الزامی است", false); return; }
+  try {
+    const data = await api("/api/v1/risk/lock", { method: "POST", body: JSON.stringify({ reason, release }) });
+    renderRiskLock(data.risk_lock);
+    toast("وضعیت قفل ریسک به‌روزرسانی شد");
+  } catch (e) { toast(e.message, false); }
+}
+
+async function setScopedKill(active) {
+  const reason = $("ksReason").value.trim();
+  if (!reason) { toast("دلیل تغییر Kill Switch الزامی است", false); return; }
+  if (!active && !confirm("غیرفعال‌سازی Kill Switch ارسال سفارش‌ها را دوباره فعال می‌کند. تأیید می‌کنید؟")) return;
+  try {
+    await api("/api/v1/killswitch", { method: "POST", body: JSON.stringify({
+      active, reason, scope: $("ksScope").value, target: $("ksTarget").value.trim(),
+    }) });
+    await refreshKillState();
+    toast("Kill Switch به‌روزرسانی شد");
+  } catch (e) { toast(e.message, false); }
+}
+
+async function addJournal() {
+  const body = $("jnBody").value.trim();
+  if (!body) { toast("متن یادداشت خالی است", false); return; }
+  try {
+    await api("/api/v1/intelligence/journal", { method: "POST", body: JSON.stringify({
+      kind: $("jnKind").value, body,
+      analysis_run_id: $("jnRun").value.trim() || null,
+      scenario_id: $("jnScenario").value.trim() || null,
+    }) });
+    $("jnBody").value = "";
+    const data = await api("/api/v1/intelligence/journal?limit=30");
+    renderJournal(data.items || []);
+  } catch (e) { toast(e.message, false); }
+}
+
+async function loadPremortem() {
+  const runId = $("pmRun").value.trim();
+  if (!runId) { $("pmResult").textContent = "Run ID الزامی است"; return; }
+  try {
+    const data = await api("/api/v1/intelligence/premortem/" + encodeURIComponent(runId));
+    const findings = data.findings || [];
+    $("pmResult").innerHTML = findings.length ? findings.map(item => {
+      const cls = item.severity === "HIGH" ? "neg" : (item.severity === "MEDIUM" ? "warn" : "muted");
+      return `<div class="kv"><b class="${cls}">${esc(item.risk)}</b><span>${esc(item.detail)}</span></div>`;
+    }).join("") : `<div class="pos">فرضیه شکست بحرانی یافت نشد.</div>`;
+  } catch (e) { $("pmResult").textContent = e.message; }
+}
+
+async function loadCounterfactual() {
+  const scenarioId = $("cfScenario").value.trim();
+  if (!scenarioId) { $("cfResult").textContent = "Scenario ID الزامی است"; return; }
+  try {
+    const data = await api("/api/v1/intelligence/counterfactual/" + encodeURIComponent(scenarioId));
+    if (!data.ok) { $("cfResult").textContent = "بازپخش ممکن نیست: " + (data.reason || "—"); return; }
+    $("cfResult").innerHTML = `<table><thead><tr><th>حالت</th><th>جهت</th><th>نتیجه</th><th class="num">R</th><th class="num">کندل</th><th class="num">MFE</th><th class="num">MAE</th></tr></thead><tbody>` +
+      (data.variants || []).map(v => `<tr><td>${esc(v.label)}</td><td>${esc(v.direction)}</td><td>${esc(v.outcome)}</td><td class="num">${fmtNumText(v.r_multiple, 2, true)}</td><td class="num">${v.bars_held}</td><td class="num">${fmtNumText(v.max_favorable_pips, 1)}</td><td class="num">${fmtNumText(v.max_adverse_pips, 1)}</td></tr>`).join("") +
+      `</tbody></table>`;
+  } catch (e) { $("cfResult").textContent = e.message; }
+}
+
+async function loadProvenance() {
+  const runId = $("pvRun").value.trim();
+  if (!runId) { $("pvResult").textContent = "Run ID الزامی است"; return; }
+  try {
+    const data = await api("/api/v1/governance/provenance/" + encodeURIComponent(runId));
+    const chain = data.chain || {};
+    const chainCls = chain.valid ? "pos" : "neg";
+    $("pvResult").innerHTML = `<div class="kv"><b>زنجیره</b><span class="${chainCls}">${chain.valid ? "معتبر" : "شکسته"}</span><b>تعداد رکورد</b><span>${data.count || 0}</span></div>` +
+      (data.records || []).map(r => `<div class="kv"><b>${esc(r.decision_status)}</b><span>${fmtDate(r.created_at)}</span><span class="muted">${esc((r.record_hash || "").slice(0, 16))}</span></div>`).join("");
+  } catch (e) { $("pvResult").textContent = e.message; }
+}
+
+async function addChallenge() {
+  const scenarioId = $("chScenario").value.trim();
+  const thesis = $("chThesis").value.trim();
+  if (!scenarioId || !thesis) { toast("Scenario ID و فرضیه الزامی است", false); return; }
+  try {
+    await api("/api/v1/intelligence/challenges/" + encodeURIComponent(scenarioId), {
+      method: "POST", body: JSON.stringify({ thesis, severity: $("chSeverity").value }),
+    });
+    $("chThesis").value = "";
+    await loadChallenges();
+  } catch (e) { toast(e.message, false); }
+}
+
+async function loadChallenges() {
+  const scenarioId = $("chScenario").value.trim();
+  if (!scenarioId) { $("chList").textContent = "Scenario ID الزامی است"; return; }
+  try {
+    const data = await api("/api/v1/intelligence/challenges/" + encodeURIComponent(scenarioId));
+    $("chList").innerHTML = (data.items || []).map(item => {
+      const cls = item.severity === "HIGH" ? "neg" : (item.severity === "MEDIUM" ? "warn" : "muted");
+      return `<div style="padding:6px;border-bottom:1px solid var(--border)"><b class="${cls}">${esc(item.severity)}</b> <span class="muted">${fmtDate(item.created_at)}</span><div>${esc(item.thesis)}</div></div>`;
+    }).join("") || `<div class="muted">چالشی ثبت نشده است</div>`;
+  } catch (e) { $("chList").textContent = e.message; }
+}
+
+// ==================== PERFORMANCE / ATTRIBUTION ====================
+const perfState = { report: null, trades: null, loading: false };
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleString("fa-IR"); } catch { return String(iso); }
+}
+
+function fmtNumText(v, digits = 2, sign = false) {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  return (sign && n >= 0 ? "+" : "") + n.toFixed(digits);
+}
+
+async function loadPerformance() {
+  if (perfState.loading) return;
+  perfState.loading = true;
+  const meta = $("perfMeta");
+  if (meta) meta.textContent = "در حال بارگذاری...";
+  try {
+    const [report, trades] = await Promise.all([
+      api("/api/v1/trading/attribution?dimension=all"),
+      api("/api/v1/trading/closed-trades?limit=200"),
+    ]);
+    perfState.report = report;
+    perfState.trades = trades;
+    renderPerformanceSummary(trades.summary || report.summary || {});
+    renderAttribution();
+    renderClosedTrades(trades.items || [], report.trade_count || 0);
+    if (meta) meta.textContent = "آخرین بروزرسانی: " + new Date().toLocaleTimeString("fa-IR");
+  } catch (error) {
+    if (meta) meta.textContent = "خطا: " + error.message;
+    renderTable("closedTradesRows", [], 9, "دریافت داده‌ها ناموفق بود", "⚠️");
+    renderTable("attributionRows", [], 5, "دریافت داده‌ها ناموفق بود", "⚠️");
+  } finally {
+    perfState.loading = false;
+  }
+}
+
+function renderPerformanceSummary(s) {
+  const net = Number(s.net_profit || 0);
+  const netEl = $("perfNet");
+  netEl.textContent = fmtNumText(s.net_profit, 2, true);
+  netEl.className = "value " + (net > 0 ? "pos" : (net < 0 ? "neg" : "muted"));
+  $("perfWinRate").textContent = s.win_rate === null || s.win_rate === undefined
+    ? "—" : (Number(s.win_rate) * 100).toFixed(1) + "%";
+  $("perfTrades").textContent = s.trades === null || s.trades === undefined ? "—" : String(s.trades);
+  $("perfPf").textContent = s.profit_factor === null || s.profit_factor === undefined
+    ? "—" : (Number.isFinite(Number(s.profit_factor)) ? Number(s.profit_factor).toFixed(2) : "∞");
+  $("perfExp").textContent = fmtNumText(s.expectancy, 2, true);
+  $("perfR").textContent = fmtNumText(s.average_r, 2, true);
+}
+
+function renderAttribution() {
+  const report = perfState.report;
+  const dimension = $("perfDimension").value;
+  const rows = (report && report.breakdowns && report.breakdowns[dimension]) || [];
+  const html = rows.map(r => {
+    const net = Number(r.net_profit || 0);
+    const winRate = r.win_rate === null || r.win_rate === undefined ? "—" : (Number(r.win_rate) * 100).toFixed(1) + "%";
+    const share = r.share === null || r.share === undefined ? "—" : (Number(r.share) * 100).toFixed(1) + "%";
+    const key = String(r.key === null || r.key === undefined ? "UNKNOWN" : r.key);
+    return `<tr>
+      <td title="${esc(key)}">${esc(key.length > 28 ? key.slice(0, 26) + "…" : key)}</td>
+      <td class="num">${esc(r.trades)}</td>
+      <td class="num">${winRate}</td>
+      <td class="num ${net > 0 ? "pos" : (net < 0 ? "neg" : "muted")}">${fmtNumText(r.net_profit, 2, true)}</td>
+      <td class="num">${share}</td>
+    </tr>`;
+  });
+  const labels = { instrument: "نماد", side: "جهت", regime: "رژیم", timeframe: "تایم‌فریم", strategy: "استراتژی", scenario: "سناریو", module: "ماژول" };
+  renderTable("attributionRows", html, 5, "برای بُعد «" + (labels[dimension] || dimension) + "» داده‌ای ثبت نشده است", "🧭");
+}
+
+function renderClosedTrades(items, totalCount) {
+  const countEl = $("closedTradesCount");
+  if (countEl) countEl.textContent = "(" + (totalCount || items.length) + " معامله)";
+  const html = items.map(t => {
+    const net = Number(t.net_profit || 0);
+    const side = String(t.side || "").toUpperCase();
+    const dirCls = side === "BUY" ? "buy" : (side === "SELL" ? "sell" : "muted");
+    const scenario = t.scenario_id ? String(t.scenario_id) : "—";
+    return `<tr>
+      <td>${esc(fmtDate(t.closed_at))}</td>
+      <td>${esc(t.instrument_id)}</td>
+      <td>${pill(side || "—", dirCls)}</td>
+      <td class="num">${esc(fmtVolume(t.volume))}</td>
+      <td class="num">${esc(fmtPrice(t.entry_price))}</td>
+      <td class="num">${esc(fmtPrice(t.exit_price))}</td>
+      <td class="num ${net > 0 ? "pos" : (net < 0 ? "neg" : "muted")}">${fmtNumText(net, 2, true)}</td>
+      <td class="num">${t.r_multiple === null || t.r_multiple === undefined ? "—" : fmtNumText(t.r_multiple, 2, true)}</td>
+      <td title="${esc(scenario)}">${esc(scenario.length > 20 ? scenario.slice(0, 18) + "…" : scenario)}</td>
+    </tr>`;
+  });
+  renderTable("closedTradesRows", html, 9, "معامله بسته‌شده‌ای ثبت نشده است", "🧾");
+}
+
+// ==================== LIVE MONITOR ====================
+
+function addLiveEvent(type, message) {
+  const time = new Date().toLocaleTimeString("fa-IR");
+  liveState.events.unshift({ type, message, time });
+  if (liveState.events.length > 50) liveState.events.length = 50;
+  renderLiveEvents();
+}
+
+function renderLiveEvents() {
+  const box = $("liveEventsList");
+  if (!box) return;
+  if (liveState.events.length === 0) {
+    box.innerHTML = '<div class="empty-state">رویدادی ثبت نشده است</div>';
+    return;
+  }
+  box.innerHTML = liveState.events.map(e => {
+    const cls = e.type === "new" ? "pos" : e.type === "error" ? "neg" : (e.type === "closed" ? "warn" : "muted");
+    return `<div style="padding:6px;border-bottom:1px solid var(--border)" class="${cls}">
+      <b style="color:var(--muted)">${esc(e.time)}</b> — ${esc(e.message)}
+    </div>`;
+  }).join("");
+}
+
+function clearLiveEvents() {
+  liveState.events = [];
+  renderLiveEvents();
+}
+
+function updateLiveIndicator(on) {
+  const el = $("liveIndicator");
+  const txt = $("liveIndicatorText");
+  const btn = $("liveToggleBtn");
+  const pulse = $("liveTabPulse");
+  if (!el || !txt || !btn) return;
+  if (on) {
+    el.className = "live-indicator on";
+    txt.textContent = `فعال — هر ${liveState.intervalMs / 1000} ثانیه`;
+    btn.textContent = "⏸️ توقف";
+    btn.className = "live-btn danger";
+    if (pulse) pulse.style.display = "inline-block";
+  } else {
+    el.className = "live-indicator off";
+    txt.textContent = "غیرفعال";
+    btn.textContent = "▶️ شروع مانیتور";
+    btn.className = "live-btn";
+    if (pulse) pulse.style.display = "none";
+  }
+}
+
+function toggleLiveMonitor() {
+  if (liveState.running) {
+    liveState.running = false;
+    stopLivePolling();
+    updateLiveIndicator(false);
+    addLiveEvent("info", "مانیتور لایو متوقف شد");
+    toast("مانیتور لایو متوقف شد", true);
+  } else {
+    liveState.running = true;
+    startLivePolling();
+    updateLiveIndicator(true);
+    addLiveEvent("info", "مانیتور لایو شروع شد");
+    toast("مانیتور لایو فعال شد", true);
+  }
+}
+
+function startLivePolling() {
+  if (liveState.timer) return;
+  refreshLiveNow();
+  liveState.timer = setInterval(refreshLiveNow, liveState.intervalMs);
+}
+
+function stopLivePolling() {
+  if (liveState.timer) {
+    clearInterval(liveState.timer);
+    liveState.timer = null;
+  }
+  if (liveState.abort) {
+    try { liveState.abort.abort(); } catch {}
+    liveState.abort = null;
+  }
+}
+
+function setLiveAlert(message, kind) {
+  const el = $("liveAlert");
+  if (!el) return;
+  if (!message) { el.className = "alert hidden"; el.innerHTML = ""; return; }
+  el.className = "alert " + (kind || "warn");
+  el.innerHTML = message;
+}
+
+function applyLiveAlert(warnings, kind) {
+  if (!warnings || warnings.length === 0) { setLiveAlert(""); return; }
+  const html = warnings.map(w => {
+    if (w.startsWith("info:")) return `<div>ℹ️ ${esc(w.slice(5))}</div>`;
+    if (w.startsWith("warn:")) return `<div>⚠️ ${esc(w.slice(5))}</div>`;
+    return `<div>⚠️ ${esc(w)}</div>`;
+  }).join("");
+  setLiveAlert(html, kind || "warn");
+}
+
+function positionSourceInfo(data) {
+  const source = (data && data.source) || "unknown";
+  if (source === "broker") return { label: "بروکر", cls: "broker", note: "پوزیشن‌ها مستقیم از بروکر خوانده می‌شوند." };
+  if (source === "system") return { label: "سیستم", cls: "system", note: "پوزیشن‌ها از سفارش‌های اجراشده داخلی ساخته شده‌اند (بروکر متصل نیست یا پوزیشن بروکر در دسترس نبود)." };
+  return { label: "نامشخص", cls: "none", note: "منبع پوزیشن تعیین نشد." };
+}
+
+async function refreshLiveNow() {
+  if (liveState.busy) return;
+  liveState.busy = true;
+  const controller = new AbortController();
+  liveState.abort = controller;
+  const signal = controller.signal;
+  const alerts = [];
+  let alertKind = "warn";
+
+  try {
+    const [signalsR, positionsR, pendingR] = await Promise.allSettled([
+      api("/api/v1/live/signals?limit=30", { signal }),
+      fetchPositions(signal),
+      api("/api/v1/orders?limit=100", { signal }).then(res => {
+        const pending = (res.items || []).filter(o =>
+          o.status === "PENDING" || o.status === "pending" || o.status === "INTENT_CREATED"
+        );
+        return { items: pending };
+      }),
+    ]);
+    liveState.ticks++;
+    if (signal.aborted) return;
+    liveState.lastUpdate = new Date();
+    $("lvLastUpdate").textContent = liveState.lastUpdate.toLocaleTimeString("fa-IR");
+
+    if (signalsR.status === "fulfilled") {
+      const items = Array.isArray(signalsR.value?.items) ? signalsR.value.items : [];
+      renderLiveSignals(items);
+    } else if (signalsR.reason?.name !== "AbortError") {
+      addLiveEvent("error", "سیگنال‌ها: " + signalsR.reason.message);
+      alerts.push("سیگنال‌ها: " + signalsR.reason.message);
+      alertKind = "error";
+    }
+
+    if (positionsR.status === "fulfilled") {
+      const outcome = renderLivePositions(positionsR.value);
+      (outcome.warnings || []).forEach(w => alerts.push(w));
+      if (outcome.kind === "error") alertKind = "error";
+      else if (outcome.kind === "warn" && alertKind !== "error") alertKind = "warn";
+    } else if (positionsR.reason?.name !== "AbortError") {
+      addLiveEvent("error", "پوزیشن‌ها: " + positionsR.reason.message);
+      alerts.push("پوزیشن‌ها: " + positionsR.reason.message);
+      alertKind = "error";
+      showPositionsError(positionsR.reason.message);
+    }
+
+    if (pendingR.status === "fulfilled") {
+      const items = Array.isArray(pendingR.value?.items) ? pendingR.value.items : [];
+      renderLivePending(items);
+    } else if (pendingR.reason?.name !== "AbortError") {
+      addLiveEvent("error", "سفارش‌ها: " + pendingR.reason.message);
+      alerts.push("سفارش‌ها: " + pendingR.reason.message);
+      alertKind = "error";
+    }
+
+    applyLiveAlert(alerts, alertKind);
+  } catch (e) {
+    if (e && e.name !== "AbortError") {
+      addLiveEvent("error", "بروزرسانی مانیتور: " + (e.message || e));
+      setLiveAlert("بروزرسانی مانیتور ناموفق بود: " + esc(e.message || String(e)), "error");
+    }
+  } finally {
+    liveState.busy = false;
+    if (liveState.abort === controller) liveState.abort = null;
+  }
+}
+
+async function fetchPositions(signal) {
+  const endpoints = ["/api/v1/trading/positions", "/api/v1/positions"];
+  let lastError = null;
+  for (const url of endpoints) {
+    try {
+      const data = await api(url, { signal });
+      const arr = extractPositionsArray(data);
+      liveState.lastPositionsRaw = { url, data };
+      return { url, data, array: arr };
+    } catch (e) {
+      lastError = e;
+      if (/HTTP 404/.test(e.message)) continue;
+      throw e;
+    }
+  }
+  throw lastError || new Error("هیچ endpoint پوزیشنی در دسترس نیست");
+}
+
+async function refreshPositionsOnly() {
+  try {
+    $("positionsDebug").textContent = "در حال دریافت...";
+    const result = await fetchPositions(null);
+    liveState.lastUpdate = new Date();
+    $("lvLastUpdate").textContent = liveState.lastUpdate.toLocaleTimeString("fa-IR");
+    const outcome = renderLivePositions(result);
+    applyLiveAlert(outcome.warnings || [], outcome.kind || "info");
+  } catch (e) {
+    showPositionsError(e.message);
+    setLiveAlert("دریافت پوزیشن‌ها ناموفق بود: " + esc(e.message), "error");
+  }
+}
+
+function renderLiveSignals(items) {
+  const active = items.filter(s => ["WATCH", "ARMED", "TRIGGERED"].includes(s.status));
+  const armed = active.filter(s => s.status === "ARMED").length;
+  const triggered = active.filter(s => s.status === "TRIGGERED").length;
+
+  $("lvActiveSignals").textContent = active.length;
+  $("lvArmedSignals").textContent = armed;
+  $("lvTriggeredSignals").textContent = triggered;
+  $("lvSignalsCount").textContent = `(${active.length} سیگنال)`;
+
+  const newIds = new Set();
+  active.forEach(s => {
+    const key = s.scenario_id || (s.instrument + ":" + s.direction + ":" + s.timeframe);
+    newIds.add(key);
+    if (!liveState.lastSignals.has(key)) {
+      addLiveEvent("new", `سیگنال جدید: ${s.instrument || s.instrument_id} ${s.direction} (${s.status})`);
+    }
+  });
+  liveState.lastSignals = newIds;
+
+  const rows = active.map(s => {
+    const dirCls = s.direction === "LONG" ? "long" : "short";
+    const statusCls = String(s.status || "").toLowerCase();
+    let rr = "—";
+    if (s.entry && s.stop && s.targets && s.targets[0] && s.entry !== s.stop) {
+      const risk = Math.abs(s.entry - s.stop);
+      const reward = Math.abs(s.targets[0] - s.entry);
+      if (risk > 0) rr = (reward / risk).toFixed(2);
+    }
+    return `<tr>
+      <td>${esc(fmtTime(s.created_at))}</td>
+      <td><b>${esc(s.instrument || s.instrument_id || "—")}</b></td>
+      <td>${esc(s.timeframe || "—")}</td>
+      <td>${pill(s.direction || "—", dirCls)}</td>
+      <td>${pill(s.status || "—", statusCls)}</td>
+      <td class="num">${s.strength != null ? Number(s.strength).toFixed(2) : "—"}</td>
+      <td class="num">${esc(s.entry || "—")}</td>
+      <td class="num">${esc(s.stop || "—")}</td>
+      <td class="num">${esc(s.targets && s.targets[0] ? s.targets[0] : "—")}</td>
+      <td class="num">${rr}</td>
+    </tr>`;
+  });
+
+  renderTable("liveSignalsRows", rows, 10, "هیچ سیگنال فعالی وجود ندارد", "🎯");
+}
+
+function renderLivePositions(result) {
+  const data = (result && result.data) || {};
+  const arr = (result && result.array) || [];
+  const src = positionSourceInfo(data);
+  const warnings = [];
+  let kind = "info";
+
+  if (!result) {
+    showPositionsError("پاسخ پوزیشن دریافت نشد");
+    return { warnings: ["پاسخ پوزیشن دریافت نشد"], kind: "error" };
+  }
+
+  $("lvPositionsSource").textContent = src.label;
+  $("lvPositionsSource").className = "source-badge " + src.cls;
+  $("lvPhaseBadge").textContent = data.phase || "—";
+  $("lvBrokerName").textContent = data.broker || "بدون بروکر";
+
+  if (Array.isArray(data.errors) && data.errors.length > 0) {
+    data.errors.forEach(e => warnings.push("warn:منبع پوزیشن: " + e));
+    kind = "warn";
+  }
+
+  if (arr.length === 0 && data && typeof data === "object" && Object.keys(data).length > 0) {
+    for (const key of Object.keys(data)) {
+      if (Array.isArray(data[key]) && data[key].length > 0) {
+        const normalized = data[key].map(normalizePosition).filter(Boolean);
+        if (normalized.length > 0) {
+          warnings.push("info:آرایه پوزیشن در کلید «" + key + "» پیدا شد.");
+          return _renderPositionsFromNormalized(normalized, src, data, warnings, kind);
+        }
+      }
+    }
+  }
+
+  const normalized = arr.map(normalizePosition).filter(Boolean);
+  return _renderPositionsFromNormalized(normalized, src, data, warnings, kind);
+}
+
+function _renderPositionsFromNormalized(normalized, src, data, warnings, kind) {
+  const count = normalized.length;
+  $("lvOpenPositions").textContent = count;
+  $("lvPositionsCount").textContent = `(${count} پوزیشن)`;
+
+  const hasPnl = normalized.some(p => p.pnl !== null);
+  const totalPnl = normalized.reduce((sum, p) => sum + (p.pnl || 0), 0);
+  const pnlEl = $("lvOpenPnl");
+  if (hasPnl) {
+    pnlEl.textContent = fmtPnlText(totalPnl);
+    pnlEl.className = "value " + (totalPnl >= 0 ? "pos" : "neg");
+  } else {
+    pnlEl.textContent = "—";
+    pnlEl.className = "value";
+  }
+
+  const phase = data.phase || "—";
+  const refresh = liveState.lastUpdate ? liveState.lastUpdate.toLocaleTimeString("fa-IR") : "—";
+  $("positionsDebug").innerHTML =
+    `<span class="${count > 0 ? "pos" : "muted"}">${count > 0 ? "✓" : "•"} ${count} پوزیشن</span>` +
+    ` — منبع: <b>${esc(src.label)}</b> — فاز: <b>${esc(phase)}</b>` +
+    ` — بروکر: <b>${esc(data.broker || "بدون بروکر")}</b> — بروزرسانی: ${esc(refresh)}` +
+    `<br><span class="muted">${esc(src.note)}</span>`;
+
+  if (count === 0) {
+    let message = "هیچ پوزیشن بازی وجود ندارد";
+    let sub = "";
+    if (src.cls === "none") {
+      message = "منبع پوزیشن در دسترس نیست";
+      sub = "دکمه «تشخیص» را بزنید تا وضعیت API بررسی شود.";
+      warnings.push("warn:منبع پوزیشن در دسترس نیست؛ نتیجه تشخیص را ببینید.");
+      kind = "warn";
+    } else if (src.cls === "system") {
+      sub = "پوزیشنی از سفارش‌های اجراشده داخلی یافت نشد.";
+      if (String(phase).startsWith("READ_ONLY") || phase === "ADVISOR") {
+        sub = "فاز " + phase + " است؛ سفارشی ارسال نمی‌شود و پوزیشن باز انتظار نمی‌رود.";
+        warnings.push("info:فاز " + phase + " است؛ اجرای سفارش غیرفعال و پوزیشن بازی انتظار نمی‌رود.");
+      }
+    } else if (src.cls === "broker") {
+      sub = "بروکر متصل است و در حال حاضر پوزیشن بازی ندارد.";
+    }
+    renderTable("livePositionsRows", [], 9, message, "💼");
+    const emptySub = document.querySelector("#livePositionsRows .empty-state");
+    if (emptySub && sub) {
+      const div = document.createElement("div");
+      div.className = "live-empty-sub";
+      div.textContent = sub;
+      emptySub.appendChild(div);
+    }
+    return { warnings, kind };
+  }
+
+  const rows = normalized.map(p => `<tr>
+    <td class="num" title="${esc(p.ticket)}">${esc(String(p.ticket).slice(0, 16))}</td>
+    <td><b>${esc(p.symbol)}</b>${p.timeframe ? ` <span class="muted" style="font-size:10px">${esc(p.timeframe)}</span>` : ""}</td>
+    <td>${pill(p.dirLabel, p.dirCls)}</td>
+    <td class="num">${p.volumeText}</td>
+    <td class="num">${p.openText}</td>
+    <td class="num">${p.currentText}</td>
+    <td class="num ${p.pnlCls}">${p.pnlText}</td>
+    <td>${p.status ? pill(p.status, p.statusCls) : "—"}</td>
+    <td>${esc(fmtTime(p.time))}</td>
+  </tr>`);
+
+  renderTable("livePositionsRows", rows, 9, "", "💼");
+  return { warnings, kind };
+}
+
+function showPositionsError(message) {
+  $("lvPositionsSource").textContent = "خطا";
+  $("lvPositionsSource").className = "source-badge none";
+  $("lvOpenPositions").textContent = "—";
+  $("lvOpenPnl").textContent = "—";
+  $("lvOpenPnl").className = "value";
+  $("positionsDebug").innerHTML = `<span class="neg">✗ دریافت پوزیشن‌ها ناموفق بود</span>`;
+  $("livePositionsRows").innerHTML =
+    `<tr><td colspan="9" class="empty-state">
+      <div class="icon">⚠️</div>
+      <div class="neg">${esc(message)}</div>
+      <div class="live-empty-sub">دکمه «تشخیص» را بزنید تا وضعیت API بررسی شود.</div>
+    </td></tr>`;
+}
+
+function renderLivePending(items) {
+  $("lvPendingCount").textContent = `(${items.length} سفارش)`;
+  const rows = items.map(o => {
+    const statusCls = String(o.status || "").toLowerCase();
+    return `<tr>
+      <td>${esc((o.intent_id || o.id || "").slice(0, 12))}</td>
+      <td><b>${esc(o.instrument_id || o.symbol || "—")}</b></td>
+      <td>${esc(o.side || o.type || "—")}</td>
+      <td class="num">${esc(o.volume != null ? o.volume : "—")}</td>
+      <td class="num">${esc(o.price != null ? o.price : "—")}</td>
+      <td>${pill(o.status || "—", statusCls)}</td>
+    </tr>`;
+  });
+  renderTable("livePendingRows", rows, 6, "سفارشی در انتظار نیست", "⏳");
+}
+
+async function debugEndpoints() {
+  $("positionsDebug").innerHTML = "<span class='muted'>در حال تشخیص endpointها...</span>";
+  const tests = [
+    { url: "/api/v1/trading/positions", label: "positions" },
+    { url: "/api/v1/trading/status", label: "status" },
+    { url: "/api/v1/orders?limit=5", label: "orders" },
+    { url: "/api/v1/live/signals?limit=5", label: "signals" },
+  ];
+  const results = [];
+  for (const test of tests) {
+    try {
+      const data = await api(test.url);
+      const arr = extractPositionsArray(data);
+      let extra = "";
+      if (test.label === "positions") {
+        extra = `source=${data?.source || "?"} phase=${data?.phase || "?"} broker=${data?.broker || "—"} errors=${(data?.errors || []).length}`;
+      }
+      results.push({ ...test, ok: true, count: arr.length, keys: Object.keys(data || {}).join(", "), extra });
+    } catch (e) {
+      results.push({ ...test, ok: false, error: e.message });
+    }
+  }
+
+  const failures = results.filter(r => !r.ok);
+  const html = results.map(r => {
+    if (r.ok) {
+      return `<div style="padding:4px;border-bottom:1px solid var(--border)">
+        <span class="pos">✓</span> <code>${esc(r.url)}</code> — count: <b>${r.count}</b>${r.extra ? ` — ${esc(r.extra)}` : ""}<br>
+        <span class="muted">keys: ${esc(r.keys || "—")}</span>
+      </div>`;
+    }
+    return `<div style="padding:4px;border-bottom:1px solid var(--border)">
+      <span class="neg">✗</span> <code>${esc(r.url)}</code> — ${esc(r.error)}
+    </div>`;
+  }).join("");
+
+  $("positionsDebug").innerHTML = `<div class="diag-box">${html}</div>`;
+  applyLiveAlert(
+    failures.length ? failures.map(f => "warn:" + f.url + " → " + f.error) : ["info:همه endpointهای مانیتور لایو در دسترس هستند."],
+    failures.length ? "warn" : "info"
+  );
+  console.table(results);
+  addLiveEvent("info", "تشخیص endpointها انجام شد");
+  toast("نتیجه تشخیص زیر جدول پوزیشن‌ها نمایش داده شد", true);
+}
+
+// ==================== Trading Settings (Smart Defaults) ====================
+const TS_TIMEFRAMES = ["M5", "M15", "H1", "H4", "D1"];
+const TS_TRADABLE = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD", "EURJPY", "GBPJPY", "XAUUSD"];
+
+function tsNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function tsPct(v) {
+  return String(Number(tsNum(v) * 100).toFixed(2));
+}
+
+function renderTsTimeframes(selected) {
+  const set = new Set((selected || []).map(tf => String(tf).toUpperCase()));
+  $("tsTimeframes").innerHTML = TS_TIMEFRAMES.map(tf =>
+    `<label style="display:flex;align-items:center;gap:5px;margin:0;font-weight:400">
+       <input type="checkbox" value="${esc(tf)}" ${set.has(tf) ? "checked" : ""} style="width:auto"> ${esc(tf)}
+     </label>`).join("");
+}
+
+function renderTsInstruments(selected) {
+  const set = new Set((selected || []).map(i => String(i).toUpperCase()));
+  const available = (state.instrumentIds && state.instrumentIds.length) ? state.instrumentIds : TS_TRADABLE;
+  $("tsInstruments").innerHTML = available.map(id =>
+    `<option value="${esc(id)}" ${set.has(String(id).toUpperCase()) ? "selected" : ""}>${esc(id)}</option>`).join("");
+}
+
+function fillTradingForm(automated, equity) {
+  if (equity !== undefined && equity !== null) $("tsEquity").value = String(equity);
+  renderTsTimeframes(automated.timeframes);
+  renderTsInstruments(automated.instruments);
+  $("tsMaxLot").value = String(automated.max_volume_per_order);
+  $("tsMaxPositions").value = String(automated.max_open_positions);
+  $("tsMaxDaily").value = String(automated.max_daily_trades);
+  $("tsRiskPct").value = tsPct(automated.risk_per_trade);
+  $("tsDailyLossPct").value = tsPct(automated.daily_loss_limit);
+  $("tsDrawdownPct").value = tsPct(automated.drawdown_stop);
+  $("tsSpread").value = String(automated.max_spread_pips);
+}
+
+function renderRecommendation(rec, automated) {
+  tradingState.recommendation = rec;
+  if (!rec) return;
+  $("tsProfile").value = rec.profile.label;
+  const warnings = (rec.warnings || []).slice();
+  if (automated) {
+    const differs =
+      tsNum(automated.max_volume_per_order) !== tsNum(rec.max_volume_per_order) ||
+      Number(automated.max_open_positions) !== Number(rec.max_open_positions) ||
+      Number(automated.max_daily_trades) !== Number(rec.max_daily_trades) ||
+      tsNum(automated.risk_per_trade) !== tsNum(rec.risk_per_trade) ||
+      tsNum(automated.daily_loss_limit) !== tsNum(rec.daily_loss_limit) ||
+      tsNum(automated.drawdown_stop) !== tsNum(rec.drawdown_stop) ||
+      tsNum(automated.max_spread_pips) !== tsNum(rec.max_spread_pips) ||
+      (automated.instruments || []).slice().sort().join(",") !== (rec.instruments || []).slice().sort().join(",") ||
+      (automated.timeframes || []).slice().sort().join(",") !== (rec.timeframes || []).slice().sort().join(",");
+    if (differs) warnings.push("مقادیر ذخیره‌شده با پیشنهاد هوشمند تفاوت دارد؛ برای اعمال، دکمه «اعمال پیشنهاد هوشمند» و سپس «ذخیره» را بزنید.");
+  }
+  $("tsWarnings").innerHTML = warnings.length
+    ? warnings.map(w => `<div>⚠️ ${esc(w)}</div>`).join("")
+    : "<span class='pos'>✅ پیشنهاد بدون هشدار آماده است.</span>";
+
+  const rows = (rec.ladder || []).map(row => {
+    let stateText = "قابل اجرا";
+    let cls = "pos";
+    if (row.below_min_lot) { stateText = "زیر حداقل لات"; cls = "neg"; }
+    else if (row.capped) { stateText = "سقف حجم"; cls = "muted"; }
+    return `<tr>
+      <td class="num">${esc(row.stop_pips)}</td>
+      <td class="num">${esc(row.volume)}</td>
+      <td class="num">${esc(row.estimated_risk)}</td>
+      <td class="${cls}">${stateText}</td>
+    </tr>`;
+  });
+  renderTable("tsLadderRows", rows, 4, "پله‌ای محاسبه نشده است", "🪜");
+}
+
+function renderPolicyHint(policy) {
+  if (!policy) return;
+  $("tsPolicyHint").innerHTML =
+    `مرجع سیاست ریسک (عبور از این مقادیر با هشدار و تأیید شما ذخیره می‌شود): ` +
+    `ریسک هر معامله ≤ <b>${tsPct(policy.hard_cap_risk_per_trade)}%</b>` +
+    ` • پوزیشن باز ≤ <b>${esc(policy.max_open_positions)}</b>` +
+    ` • معاملات روزانه ≤ <b>${esc(policy.max_daily_trades)}</b>` +
+    ` • زیان روزانه ≤ <b>${tsPct(policy.daily_loss_limit)}%</b>` +
+    ` • اسپرد ≤ <b>${esc(policy.max_spread_pips)}</b> پیپ` +
+    ` • حد ضرر مجاز: <b>${esc(policy.min_stop_pips)}..${esc(policy.max_stop_pips)}</b> پیپ` +
+    ` • افت سرمایه: هشدار ${tsPct(policy.drawdown_warn)}% / توقف ${tsPct(policy.drawdown_stop)}% (سقف سخت ${tsPct(policy.max_drawdown_hard_cap)}%)`;
+}
+
+async function loadTradingSettings(equityOverride) {
+  if (tradingState.loading) return;
+  tradingState.loading = true;
+  const status = $("tsStatus");
+  if (status) status.textContent = "در حال بارگذاری...";
+  try {
+    const query = equityOverride ? "?equity=" + encodeURIComponent(equityOverride) : "";
+    const data = await api("/api/v1/trading/settings" + query);
+    tradingState.data = data;
+    fillTradingForm(data.automated_limited, data.equity);
+    renderRecommendation(data.recommendation, data.automated_limited);
+    renderPolicyHint(data.policy);
+    if (status) {
+      const src = data.equity_source === "account_snapshot" ? "آخرین تصویر حساب"
+        : (data.equity_source === "query" ? "ورودی دستی" : "مقدار پیش‌فرض؛ سرمایه واقعی در دسترس نبود");
+      status.textContent = "سرمایه مبنا: " + data.equity + " USD (" + src + ") — " + new Date().toLocaleTimeString("fa-IR");
+    }
+  } catch (e) {
+    if (status) status.innerHTML = `<span class="neg">خطا: ${esc(e.message)}</span>`;
+    toast(e.message, false);
+  } finally {
+    tradingState.loading = false;
+  }
+}
+
+async function refreshTradingRecommendation() {
+  const equity = tsNum($("tsEquity").value);
+  if (equity <= 0) { toast("سرمایه باید بزرگ‌تر از صفر باشد", false); return; }
+  try {
+    const data = await api("/api/v1/trading/settings?equity=" + encodeURIComponent(equity));
+    tradingState.data = data;
+    renderRecommendation(data.recommendation, tradingState.data.automated_limited);
+    renderPolicyHint(data.policy);
+    $("tsStatus").textContent = "پیشنهاد برای سرمایه " + equity + " USD محاسبه شد.";
+  } catch (e) {
+    toast(e.message, false);
+  }
+}
+
+function applySmartTradingDefaults() {
+  const rec = tradingState.recommendation;
+  if (!rec) { toast("ابتدا پیشنهاد را محاسبه کنید", false); return; }
+  fillTradingForm({
+    max_volume_per_order: rec.max_volume_per_order,
+    max_open_positions: rec.max_open_positions,
+    max_daily_trades: rec.max_daily_trades,
+    risk_per_trade: rec.risk_per_trade,
+    daily_loss_limit: rec.daily_loss_limit,
+    drawdown_stop: rec.drawdown_stop,
+    max_spread_pips: rec.max_spread_pips,
+    instruments: rec.instruments,
+    timeframes: rec.timeframes,
+  }, rec.equity);
+  $("tsStatus").textContent = "پیشنهاد هوشمند در فرم قرار گرفت؛ برای اعمال روی موتور معامله، «ذخیره و اعمال» را بزنید.";
+  toast("پیشنهاد هوشمند در فرم اعمال شد", true);
+}
+
+function collectTradingForm() {
+  const timeframes = Array.from(document.querySelectorAll("#tsTimeframes input:checked")).map(cb => cb.value);
+  const instruments = Array.from($("tsInstruments").selectedOptions).map(o => o.value);
+  if (timeframes.length === 0) throw new Error("حداقل یک تایم‌فریم انتخاب کنید");
+  if (instruments.length === 0) throw new Error("حداقل یک نماد انتخاب کنید");
+  const values = {
+    max_volume_per_order: $("tsMaxLot").value,
+    max_open_positions: Number($("tsMaxPositions").value),
+    max_daily_trades: Number($("tsMaxDaily").value),
+    risk_per_trade: String(tsNum($("tsRiskPct").value) / 100),
+    daily_loss_limit: String(tsNum($("tsDailyLossPct").value) / 100),
+    drawdown_stop: String(tsNum($("tsDrawdownPct").value) / 100),
+    max_spread_pips: $("tsSpread").value,
+    instruments: instruments,
+    timeframes: timeframes,
+  };
+  if (tsNum(values.max_volume_per_order) <= 0) throw new Error("حداکثر لات باید مثبت باشد");
+  if (values.max_open_positions < 1) throw new Error("تعداد پوزیشن باید حداقل ۱ باشد");
+  if (values.max_daily_trades < 1) throw new Error("تعداد معاملات روزانه باید حداقل ۱ باشد");
+  if (tsNum(values.risk_per_trade) <= 0) throw new Error("ریسک هر معامله باید مثبت باشد");
+  if (tsNum(values.max_spread_pips) <= 0) throw new Error("حداکثر اسپرد باید مثبت باشد");
+  return values;
+}
+
+async function saveTradingSettings(confirmed = false) {
+  let values;
+  try {
+    values = collectTradingForm();
+  } catch (e) {
+    toast(e.message, false);
+    return;
+  }
+  const status = $("tsStatus");
+  try {
+    const body = { automated_limited: values };
+    if (confirmed) body.confirm_warnings = true;
+    const data = await api("/api/v1/trading/settings", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    if (data.requires_confirmation) {
+      const list = (data.warnings || []).map((w, i) => (i + 1) + ". " + w).join("\\n");
+      if (!confirm("این مقادیر از سقف پیشنهادی/سیاست فراتر است:\\n\\n" + list + "\\n\\nبا تأیید شما ذخیره و اعمال می‌شوند (موتور ریسک همچنان سقف‌های سخت خود را دارد). ادامه می‌دهید؟")) {
+        if (status) status.innerHTML = `<span class="warn">ذخیره لغو شد؛ ${(data.warnings || []).length} هشدار تأیید نشد.</span>`;
+        return;
+      }
+      return saveTradingSettings(true);
+    }
+    toast("تنظیمات معاملات ذخیره و اعمال شد", true);
+    if (status) status.textContent = data.note || "ذخیره شد.";
+    await loadTradingSettings();
+  } catch (e) {
+    if (status) status.innerHTML = `<span class="neg">خطا: ${esc(e.message)}</span>`;
+    toast(e.message, false);
+  }
+}
+
+// ==================== Broker / Orders ====================
+async function loadBrokerStatus() {
+  try {
+    const data = await api("/api/v1/trading/status");
+    const el = $("brokerStatus");
+    if (data.connected) {
+      el.innerHTML = `<div class="kv">
+        <b>وضعیت</b><span class="pos">✅ متصل</span>
+        <b>حساب</b><span>${esc(data.account?.login)}</span>
+        <b>موجودی</b><span>${esc(data.account?.balance)} ${esc(data.account?.currency)}</span>
+      </div>`;
+    } else {
+      el.innerHTML = `<div class="kv">
+        <b>وضعیت</b><span class="neg">❌ قطع</span>
+        <b>دلیل</b><span>${esc(data.reason || "—")}</span>
+      </div>`;
+    }
+    $("tradingPhase").textContent = data.phase || "—";
+    $("tradingEnabled").textContent = (data.phase && data.phase !== "READ_ONLY") ? "✅ فعال" : "❌ غیرفعال";
+    const equity = data.connected && data.account ? Number(data.account.equity) : 0;
+    loadTradingSettings(equity > 0 ? equity : undefined).catch(() => {});
+  } catch (e) {
+    $("brokerStatus").innerHTML = `<span class="neg">خطا: ${esc(e.message)}</span>`;
+  }
+}
+
+async function loadOrders() {
+  try {
+    const data = await api("/api/v1/orders?limit=50");
+    const items = data.items || [];
+    const rows = items.map(o => {
+      const color = o.status === "FILLED" ? "pos" : (o.status === "REJECTED" ? "neg" : "muted");
+      return `<tr>
+        <td>${esc((o.intent_id || "").slice(0, 12))}</td>
+        <td>${esc(o.instrument_id)}</td>
+        <td>${esc(o.side)}</td>
+        <td>${esc(o.volume)}</td>
+        <td class="${color}">${esc(o.status)}</td>
+        <td>${esc(o.created_at)}</td>
+      </tr>`;
+    });
+    renderTable("ordersRows", rows, 6, "سفارشی ثبت نشده است", "📋");
+  } catch (e) {
+    $("ordersRows").innerHTML = `<tr><td colspan="6" class="neg">خطا: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+// ==================== Scenarios ====================
+async function loadScenarios() {
+  try {
+    const data = await api("/api/v1/scenarios?limit=100");
+    const items = data.items || [];
+    $("scenarioCount").textContent = `(${items.length})`;
+    const rows = items.map(s => `<tr>
+      <td>${esc((s.scenario_id || "").slice(0, 12))}</td>
+      <td>${esc(s.instrument_id)}</td>
+      <td>${esc(s.direction)}</td>
+      <td>${esc(s.status)}</td>
+      <td>${esc(s.expiry_at || "—")}</td>
+    </tr>`);
+    renderTable("scenarioRows", rows, 5, "سناریویی وجود ندارد", "📋");
+  } catch (e) {
+    $("scenarioRows").innerHTML = `<tr><td colspan="5" class="neg">${esc(e.message)}</td></tr>`;
+  }
+}
+
+async function loadRiskScenarios() {
+  try {
+    const data = await api("/api/v1/scenarios?limit=50");
+    const select = $("riskScenario");
+    const active = (data.items || []).filter(s => ["WATCH", "ARMED", "TRIGGERED"].includes(s.status));
+    if (active.length === 0) {
+      select.innerHTML = "<option value=''>هیچ سناریوی فعالی وجود ندارد</option>";
+      return;
+    }
+    select.innerHTML = active.map(s =>
+      `<option value="${esc(s.scenario_id)}">${esc(s.instrument_id)} | ${esc(s.direction)} | ${esc(s.status)}</option>`
+    ).join("");
+  } catch {
+    $("riskScenario").innerHTML = "<option value=''>خطا در بارگذاری سناریوها</option>";
+  }
+}
+
+// ==================== Health ====================
+async function loadHealth() {
+  try {
+    const data = await api("/api/v1/health/ready");
+    const box = $("healthBox");
+    const entries = Object.entries(data.checks || {});
+    if (entries.length === 0) { box.innerHTML = "اطلاعاتی موجود نیست"; return; }
+    box.innerHTML = entries.map(([k, v]) =>
+      `<b>${esc(k)}</b><span class="${v ? "pos" : "neg"}">${v ? "✅ سالم" : "❌ خطا"}</span>`
+    ).join("");
+  } catch (e) {
+    $("healthBox").innerHTML = `<span class="neg">خطا: ${esc(e.message)}</span>`;
+  }
+}
+
+// ==================== Analysis / Risk / Kill ====================
+async function runAnalysis() {
+  try {
+    const data = await api("/api/v1/analysis-runs", {
+      method: "POST",
+      body: JSON.stringify({ instrument_id: $("instrument").value, timeframe: $("timeframe").value }),
+    });
+    $("marketSummary").innerHTML =
+      `<b>اجرا</b><span>${esc(data.run.run_id)}</span><b>تصمیم</b><span>${esc(data.decision.action)}</span>`;
+  } catch (e) { toast(e.message, false); }
+}
+
+async function evaluateRisk() {
+  const sid = $("riskScenario").value;
+  if (!sid) { toast("سناریو انتخاب نشده است", false); return; }
+  try {
+    const account = {
+      equity: $("equity").value, balance: $("equity").value, free_margin: $("equity").value,
+      taken_at: new Date().toISOString(), currency: "USD", leverage: "100",
+      open_positions: 0, positions: [],
+    };
+    const data = await api("/api/v1/risk/evaluate", {
+      method: "POST",
+      body: JSON.stringify({ scenario_id: sid, account }),
+    });
+    const decision = data.decision || {};
+    const color = decision.approved ? "pos" : "neg";
+    const size = Number(decision.position_size || 0);
+    const checks = Array.isArray(decision.checks_failed) ? decision.checks_failed : [];
+    const sizeNote = (!decision.approved && size <= 0)
+      ? ` <span class="neg">(حجم صفر — کوچک‌تر از حداقل لات یا نامعتبر)</span>` : "";
+    let html = `<div class="kv">
+      <b>وضعیت</b><span class="${color}">${decision.approved ? "✅ تایید شد" : "❌ رد شد"}</span>
+      <b>حجم</b><span class="${size > 0 ? "" : "neg"}">${esc(decision.position_size || "0")} لات${sizeNote}</span>
+      <b>دلیل</b><span>${esc(decision.reason_code || "—")}</span>`;
+    if (decision.reason_detail) {
+      html += `<b>توضیح</b><span>${esc(decision.reason_detail)}</span>`;
+    }
+    if (checks.length) {
+      html += `<b>بررسی‌های ناموفق</b><span class="neg">${esc(checks.join(" ، "))}</span>`;
+    }
+    html += `</div>`;
+    $("riskResult").innerHTML = html;
+    if (!decision.approved) {
+      toast(`ریسک رد شد: ${decision.reason_code || "unknown"}${checks.length ? " — " + checks.join("، ") : ""}`, false);
+    }
+  } catch (e) { toast(e.message, false); }
+}
+
+async function toggleKill(active) {
+  const reason = ($("killReason").value || "").trim() || "manual";
+  if (!active && !confirm("غیرفعال‌سازی Kill Switch ارسال سفارش‌ها را دوباره فعال می‌کند. تأیید می‌کنید؟")) return;
+  try {
+    await api("/api/v1/killswitch", {
+      method: "POST",
+      body: JSON.stringify({ active, reason }),
+    });
+    await refreshKillState();
+    toast(active ? "Kill Switch فعال شد" : "Kill Switch غیرفعال شد", true);
+  } catch (e) { toast(e.message, false); }
+}
+
+// ==================== Strategy / Trading ====================
+const MANUAL_STRATEGY_TF = { "EMA20/FullBody": "M5", "H&S/Reversal": "M5" };
+
+function onStrategySelectChanged() {
+  const name = $("stratStrategy").value;
+  localStorage.setItem("fxars_strategy", name);
+  const tf = $("stratTimeframe");
+  const required = MANUAL_STRATEGY_TF[name];
+  if (required) {
+    tf.value = required;
+    tf.disabled = true;
+  } else {
+    tf.disabled = false;
+  }
+  $("stratModeHint").textContent = required
+    ? `استراتژی دستی انتخاب شد؛ فقط روی تایم‌فریم ${required} و هم‌جهت با روند H1 (EMA50) اجرا می‌شود.`
+    : "بدون انتخاب دستی، بهترین استراتژی بر اساس بک‌تست به‌صورت خودکار انتخاب می‌شود.";
+}
+
+function restoreStrategySelection() {
+  const select = $("stratStrategy");
+  if (!select) return;
+  const saved = localStorage.getItem("fxars_strategy") || "";
+  if (Array.from(select.options).some(o => o.value === saved)) select.value = saved;
+  onStrategySelectChanged();
+}
+
+function selectedStrategy() {
+  return $("stratStrategy") ? $("stratStrategy").value : "";
+}
+
+async function analyzeStrategies() {
+  try {
+    $("stratResult").innerHTML = "<span class='muted'>در حال تحلیل...</span>";
+    const strategy = selectedStrategy();
+    const body = {
+      instrument_id: $("stratInstrument").value,
+      timeframe: $("stratTimeframe").value,
+      bars: parseInt($("stratBars").value),
+    };
+    if (strategy) body.strategy = strategy;
+    const data = await api("/api/v1/strategy/analyze", { method: "POST", body: JSON.stringify(body) });
+
+    const signal = data.signal || "NO_TRADE";
+    const signalColor = signal === "NO_TRADE" ? "neg" : "pos";
+    const trend = data.trend_filter || null;
+    const trendText = !trend || !trend.applied ? "اعمال نشد"
+      : (trend.direction === "UP" ? "صعودی (خرید مجاز)" : trend.direction === "DOWN" ? "نزولی (فروش مجاز)" : "نامشخص (ورود مسدود)");
+    let html = `<div class="kv">
+      <b>سیگنال</b><span class="${signalColor}">${esc(signal)}</span>
+      <b>استراتژی</b><span>${esc(data.selected || "خودکار")}</span>
+      ${trend ? `<b>فیلتر روند ${esc(trend.timeframe)}</b><span>${trendText}</span>` : ""}
+      <b>دلیل</b><span>${esc(data.reason || "—")}</span>
+      ${data.entry ? `<b>ورود / حد ضرر / هدف</b><span>${esc(data.entry)} / ${esc(data.stop)} / ${esc(data.target)}</span>` : ""}
+    </div>`;
+    html += "<table><thead><tr><th>استراتژی</th><th>trades</th><th>سود</th><th>Sharpe</th><th>PF</th><th>MDD%</th><th>امتیاز</th></tr></thead><tbody>";
+    (data.all || []).forEach(r => {
+      const best = data.best && data.best.name === r.name;
+      html += `<tr style="${best ? "background:rgba(34,197,94,.15)" : ""}">
+        <td>${best ? "⭐ " : ""}${esc(r.name)}</td>
+        <td>${r.trades}</td>
+        <td class="${r.net_profit >= 0 ? "pos" : "neg"}">${r.net_profit.toFixed(2)}</td>
+        <td>${r.sharpe.toFixed(2)}</td>
+        <td>${r.profit_factor === 999 ? "∞" : r.profit_factor.toFixed(2)}</td>
+        <td>${r.max_drawdown_pct.toFixed(2)}</td>
+        <td>${r.score.toFixed(3)}</td>
+      </tr>`;
+    });
+    html += "</tbody></table>";
+    $("stratResult").innerHTML = html;
+  } catch (e) {
+    $("stratResult").innerHTML = `<span class="neg">${esc(e.message)}</span>`;
+  }
+}
+
+async function tradeMultiWithStrategy() {
+  const select = $("multiStratInstrument");
+  const instruments = Array.from(select.selectedOptions).map(o => o.value);
+  if (instruments.length === 0) { toast("حداقل یک نماد انتخاب کنید", false); return; }
+  const strategy = selectedStrategy();
+  const modeLabel = strategy ? `استراتژی «${strategy}»` : "استراتژی خودکار";
+  if (!confirm(`⚠️ ارسال سفارش با ${modeLabel} برای ${instruments.length} نماد. مطمئن؟`)) return;
+
+  try {
+    $("autoTradeResult").innerHTML = `<span class="muted">در حال ارسال...</span>`;
+    const body = {
+      instruments, timeframe: $("stratTimeframe").value,
+      bars: parseInt($("stratBars").value),
+    };
+    if (strategy) body.strategy = strategy;
+    const data = await api("/api/v1/strategy/trade_multi", { method: "POST", body: JSON.stringify(body) });
+
+    let html = "<table><thead><tr><th>نماد</th><th>وضعیت</th><th>پیام</th></tr></thead><tbody>";
+    (data.results || []).forEach(r => {
+      const color = r.status === "filled" ? "pos" : (r.status === "error" ? "neg" : "muted");
+      html += `<tr>
+        <td>${esc(r.instrument)}</td>
+        <td class="${color}">${esc(r.status)}</td>
+        <td>${esc(r.message || r.order_id || "")}</td>
+      </tr>`;
+    });
+    html += "</tbody></table>";
+    $("autoTradeResult").innerHTML = html;
+    toast("✅ عملیات انجام شد", true);
+    await loadOrders();
+  } catch (e) {
+    $("autoTradeResult").innerHTML = `<span class="neg">${esc(e.message)}</span>`;
+  }
+}
+
+async function toggleAutoTrade(enabled) {
+  try {
+    await api("/api/v1/trading/auto_trade", { method: "POST", body: JSON.stringify({ enabled }) });
+    toast(enabled ? "🤖 حالت رباتیک فعال شد" : "👤 حالت دستی فعال شد", true);
+  } catch (e) {
+    toast(e.message, false);
+    await loadAutoTradeStatus();
+  }
+}
+
+async function loadAutoTradeStatus() {
+  try {
+    const data = await api("/api/v1/trading/auto_trade");
+    const cb = $("autoTradeToggle");
+    if (cb) cb.checked = !!data.enabled;
+  } catch { }
+}
+
+// ==================== Chart ====================
+async function loadChart() {
+  if (chartState.loading) return;
+  chartState.loading = true;
+  try {
+    const inst = $("chartInstrument").value;
+    const tf = $("chartTimeframe").value;
+    const limit = $("chartLimit").value;
+    const data = await api(`/api/v1/live/chart?instrument=${encodeURIComponent(inst)}&timeframe=${tf}&limit=${limit}`);
+
+    if (!window.LightweightCharts) { toast("کتابخانه چارت لود نشد", false); return; }
+    const LWC = window.LightweightCharts;
+
+    if (chartState.chart) { try { chartState.chart.remove(); } catch {} chartState.chart = null; }
+    if (chartState.rsiChart) { try { chartState.rsiChart.remove(); } catch {} chartState.rsiChart = null; }
+
+    const container = $("chartContainer");
+    const chart = LWC.createChart(container, {
+      width: container.clientWidth, height: 420,
+      layout: { background: { color: "#0a1428" }, textColor: "#94a3b8" },
+    });
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: "#22c55e", downColor: "#ef4444",
+      borderUpColor: "#22c55e", borderDownColor: "#ef4444",
+      wickUpColor: "#22c55e", wickDownColor: "#ef4444",
+    });
+    candleSeries.setData((data.candles || []).map(c => ({
+      time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+    })));
+    chart.timeScale().fitContent();
+    chartState.chart = chart;
+
+    const rsiContainer = $("rsiContainer");
+    rsiContainer.innerHTML = "";
+    const rsiChart = LWC.createChart(rsiContainer, {
+      width: rsiContainer.clientWidth, height: 140,
+      layout: { background: { color: "#0a1428" }, textColor: "#94a3b8" },
+    });
+    const rsiSeries = rsiChart.addLineSeries({ color: "#a855f7", lineWidth: 2 });
+    if (data.indicators && data.indicators.rsi14) {
+        const rsiData = data.candles.map((c, i) => ({ time: c.time, value: data.indicators.rsi14[i] })).filter(x => x.value !== null);
+        rsiSeries.setData(rsiData);
+    }
+    rsiSeries.createPriceLine({ price: 70, color: "#ef4444", lineStyle: 2, lineWidth: 1 });
+    rsiSeries.createPriceLine({ price: 30, color: "#22c55e", lineStyle: 2, lineWidth: 1 });
+    rsiChart.timeScale().fitContent();
+    chartState.rsiChart = rsiChart;
+  } catch (e) {
+    toast(e.message, false);
+  } finally {
+    chartState.loading = false;
+  }
+}
+
+// ==================== History Download ====================
+let _histInstruments = [];
+let _histTfs = ["M5", "M15", "M30", "H1", "H4", "D1"];
+
+async function loadHistoryCheckboxes() {
+  try {
+    const data = await api("/api/v1/instruments");
+    _histInstruments = (data.items || []).map(i => i.instrument_id);
+    const box = $("histInstrumentsBox");
+    box.innerHTML = _histInstruments.map(id =>
+      `<label><input type="checkbox" value="${esc(id)}" onchange="updateHistCount()"> ${esc(id)}</label>`
+    ).join("");
+
+    const tfBox = $("histTfsBox");
+    tfBox.innerHTML = _histTfs.map(tf =>
+      `<label><input type="checkbox" value="${esc(tf)}" onchange="updateHistCount()"> ${esc(tf)}</label>`
+    ).join("");
+
+    updateHistCount();
+  } catch (e) {
+    $("histInstrumentsBox").innerHTML = `<span class="neg">${esc(e.message)}</span>`;
+  }
+}
+
+function updateHistCount() {
+  const instChecked = document.querySelectorAll("#histInstrumentsBox input:checked").length;
+  const tfChecked = document.querySelectorAll("#histTfsBox input:checked").length;
+  $("histInstrumentsCount").textContent = instChecked;
+  $("histTfsCount").textContent = tfChecked;
+}
+
+function selectAllInstruments(checked) {
+  document.querySelectorAll("#histInstrumentsBox input[type=checkbox]").forEach(cb => { cb.checked = checked; });
+  updateHistCount();
+}
+
+function selectAllTfs(checked) {
+  document.querySelectorAll("#histTfsBox input[type=checkbox]").forEach(cb => { cb.checked = checked; });
+  updateHistCount();
+}
+
+async function downloadHistory() {
+  const instruments = Array.from(document.querySelectorAll("#histInstrumentsBox input:checked")).map(cb => cb.value);
+  const timeframes = Array.from(document.querySelectorAll("#histTfsBox input:checked")).map(cb => cb.value);
+  const bars = parseInt($("histBars").value) || 5000;
+
+  if (instruments.length === 0) { toast("حداقل یک نماد انتخاب کنید", false); return; }
+  if (timeframes.length === 0) { toast("حداقل یک تایم‌فریم انتخاب کنید", false); return; }
+
+  $("histDownloadBtn").disabled = true;
+  $("historyResult").innerHTML = `<span class="muted">در حال دانلود...</span>`;
+
+  try {
+    const data = await api("/api/v1/history/download", {
+      method: "POST",
+      body: JSON.stringify({ instruments, timeframes, bars }),
+    });
+    $("historyResult").innerHTML = `<div class="kv">
+      <b>تعداد کل</b><span>${esc(data.total || "—")}</span>
+    </div>`;
+    toast("دانلود انجام شد", true);
+  } catch (e) {
+    $("historyResult").innerHTML = `<span class="neg">${esc(e.message)}</span>`;
+  } finally {
+    $("histDownloadBtn").disabled = false;
+  }
+}
+
+async function loadHistoryFiles() {
+  try {
+    const data = await api("/api/v1/history/files");
+    const files = data.files || [];
+    if (files.length === 0) {
+      $("historyResult").innerHTML = '<span class="muted">هیچ فایلی موجود نیست</span>';
+      return;
+    }
+    const rows = files.map(f => `<tr>
+      <td>${esc(f.name || f.path)}</td>
+      <td>${esc(f.size || "—")}</td>
+      <td>${esc(f.modified || "—")}</td>
+    </tr>`);
+    $("historyResult").innerHTML = `<table><thead><tr><th>فایل</th><th>حجم</th><th>تاریخ</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  } catch (e) {
+    $("historyResult").innerHTML = `<span class="neg">${esc(e.message)}</span>`;
+  }
+}
+
+// ==================== Backtest ====================
+async function runBacktest() {
+  try {
+    $("btResult").innerHTML = "<span class='muted'>اجرا...</span>";
+    const data = await api("/api/v1/backtests", {
+      method: "POST",
+      body: JSON.stringify({ instrument_id: $("btInstrument").value, timeframe: "H1", segment: "ALL" }),
+    });
+    $("btResult").innerHTML = `<div class="kv">
+      <b>معاملات</b><span>${esc(data.run.metrics.trade_count)}</span>
+      <b>سود</b><span class="${data.run.metrics.net_profit >= 0 ? "pos" : "neg"}">${esc(data.run.metrics.net_profit)}</span>
+    </div>`;
+  } catch (e) {
+    $("btResult").innerHTML = `<span class="neg">${esc(e.message)}</span>`;
+  }
+}
+
+// ==================== Telegram ====================
+async function loadTelegramSettings() {
+  try {
+    const data = await api("/api/v1/settings/telegram");
+    const s = data.settings || {};
+    $("tgChatId").value = s.chat_id || "";
+    $("tgEnabled").checked = !!s.enabled;
+    $("desktopEnabled").checked = !!s.desktop_notify_enabled;
+    $("tgToken").value = "";
+    $("tgToken").placeholder = s.token_masked ? ("توکن فعلی: " + s.token_masked) : "توکن تنظیم نشده";
+    $("tgStatus").innerHTML = "<span class='pos'>تنظیمات بارگذاری شد</span>";
+  } catch (e) {
+    $("tgStatus").innerHTML = `<span class="neg">${esc(e.message)}</span>`;
+  }
+}
+
+async function saveTelegram() {
+  const body = {
+    token: $("tgToken").value.trim(), chat_id: $("tgChatId").value.trim(),
+    enabled: $("tgEnabled").checked, desktop_notify_enabled: $("desktopEnabled").checked,
+  };
+  try {
+    await api("/api/v1/settings/telegram", { method: "POST", body: JSON.stringify(body) });
+    $("tgStatus").innerHTML = "<span class='pos'>✅ ذخیره شد</span>";
+    await loadTelegramSettings();
+  } catch (e) {
+    $("tgStatus").innerHTML = `<span class="neg">${esc(e.message)}</span>`;
+  }
+}
+
+async function testTelegram() {
+  $("tgStatus").innerHTML = "<span class='muted'>در حال ارسال...</span>";
+  try {
+    const data = await api("/api/v1/settings/telegram/test", { method: "POST" });
+    $("tgStatus").innerHTML = data.ok
+      ? "<span class='pos'>✅ پیام تست ارسال شد</span>"
+      : `<span class="neg">ناموفق: ${esc(JSON.stringify(data))}</span>`;
+  } catch (e) {
+    $("tgStatus").innerHTML = `<span class="neg">${esc(e.message)}</span>`;
+  }
+}
+
+async function testDesktop() {
+  $("tgStatus").innerHTML = "<span class='muted'>در حال ارسال...</span>";
+  try {
+    const data = await api("/api/v1/settings/desktop/test", { method: "POST" });
+    if (data.ok) {
+      $("tgStatus").innerHTML = `<span class="pos">✅ نوتیف دسکتاپ (backend: ${esc(data.backend)})</span>`;
+      $("desktopBackend").textContent = "backend: " + (data.backend || "—");
+    } else {
+      $("tgStatus").innerHTML = `<span class="neg">${esc(JSON.stringify(data))}</span>`;
+    }
+  } catch (e) {
+    $("tgStatus").innerHTML = `<span class="neg">${esc(e.message)}</span>`;
+  }
+}
+
+// ==================== Phase Modal ====================
+let _selectedMode = null;
+let _currentMode = null;
+
+async function openPhaseModal() {
+  try {
+    const data = await api("/api/v1/phase");
+    const uiMode = (data.settings && data.settings.mode) || "ADVISOR";
+    const runtimePhase = data.runtime_phase || "UNKNOWN";
+    _currentMode = uiMode;
+    _selectedMode = uiMode;
+    const display = uiMode === "ADVISOR" ? "ADVISOR (مشاور)"
+      : uiMode === "AUTOMATED_LIMITED" ? "AUTOMATED (ربات)" : uiMode;
+    $("phaseCurrent").textContent = display + " — runtime: " + runtimePhase;
+
+    document.querySelectorAll("#phaseModal .mode-option").forEach(el => el.classList.remove("selected"));
+    if (uiMode === "ADVISOR" || uiMode === "READ_ONLY") $("modeAdvisor").classList.add("selected");
+    else $("modeRobot").classList.add("selected");
+
+    $("robotConfirm").classList.add("hidden");
+    $("phaseError").textContent = "";
+    $("phaseModal").classList.add("active");
+  } catch (e) {
+    toast("خطا در خواندن فاز: " + e.message, false);
+  }
+}
+
+function closePhaseModal() { $("phaseModal").classList.remove("active"); }
+
+function selectMode(mode) {
+  _selectedMode = mode;
+  document.querySelectorAll("#phaseModal .mode-option").forEach(el => el.classList.remove("selected"));
+  if (mode === "ADVISOR") {
+    $("modeAdvisor").classList.add("selected");
+    $("robotConfirm").classList.add("hidden");
+  } else {
+    $("modeRobot").classList.add("selected");
+    $("robotConfirm").classList.remove("hidden");
+    $("robotConfirmInput").value = "";
+    $("robotConfirmInput").focus();
+  }
+}
+
+async function savePhase() {
+  $("phaseError").textContent = "";
+  if (!_selectedMode) { $("phaseError").textContent = "حالتی انتخاب نشده."; return; }
+  if (_selectedMode === _currentMode) { closePhaseModal(); return; }
+
+  if (_selectedMode === "AUTOMATED_LIMITED") {
+    if (($("robotConfirmInput").value || "").trim() !== "ENABLE ROBOT") {
+      $("phaseError").textContent = "برای فعال‌سازی ربات، ENABLE ROBOT را دقیقاً تایپ کنید.";
+      return;
+    }
+  }
+
+  try {
+    $("phaseSaveBtn").disabled = true;
+    const payload = { mode: _selectedMode };
+    if (_selectedMode === "AUTOMATED_LIMITED") payload.robot_confirm = "ENABLE ROBOT";
+    const data = await api("/api/v1/phase", { method: "POST", body: JSON.stringify(payload) });
+    const runtime = data.runtime_phase || data.mode;
+    const suffix = runtime !== data.mode ? " (runtime: " + runtime + ")" : "";
+    toast("فاز اعمال شد: " + data.mode + suffix, true);
+    if (data.warning) toast(data.warning, false);
+    $("phaseBadge").textContent = "فاز: " + runtime;
+    closePhaseModal();
+    await loadAll();
+  } catch (e) {
+    $("phaseError").textContent = e.message;
+  } finally {
+    $("phaseSaveBtn").disabled = false;
+  }
+}
+
+// ==================== Keyboard ====================
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $("phaseModal").classList.contains("active")) closePhaseModal();
+});
+
+// ==================== Init ====================
+(function init() {
+  if (!state.isLocalhost) {
+    const hints = $("demoHints");
+    if (hints) hints.style.display = "none";
+  }
+
+  // نمایش صفحه ورود به عنوان پیش‌فرض (برای جلوگیری از ورود خودکار و اجازه انتخاب نقش)
+  $("loginView").classList.remove("hidden");
+  $("appView").classList.add("hidden");
+
+  if (state.token) {
+    const err = $("loginError");
+    if (err) {
+      err.textContent = "شما قبلاً وارد شده بودید. برای تغییر نقش (مثلاً ادمین) مجدداً وارد شوید.";
+      err.style.color = "#f59e0b"; // رنگ نارنجی
+    }
+  }
+
+  selectRole("analyst");
+  initTabs();
+  restoreStrategySelection();
+  updateLiveIndicator(false);
+})();
+</script>
+</body>
+</html>

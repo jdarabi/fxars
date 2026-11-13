@@ -95,6 +95,18 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(len(listing["items"]), 1)
 
+    def test_forward_test_endpoint(self) -> None:
+        token = self.login()
+        status, payload, _ = self.call("POST", "/api/v1/trading/forward-test", {
+            "instrument_id": "EURUSD", "timeframe": "H1",
+            "warmup": 300, "step": 100, "max_steps": 2,
+            "as_of": self.env.as_of.isoformat(),
+        }, token=token)
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["verdict"], "PASS")
+        self.assertEqual(payload["candles_tested"], 2)
+        self.assertEqual(payload["lookahead_violations"], [])
+
     def test_rbac_denies_audit_to_analyst(self) -> None:
         token = self.login()
         status, payload, _ = self.call("GET", "/api/v1/audit-events", token=token)

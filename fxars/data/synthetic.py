@@ -17,7 +17,12 @@ from fxars.core.numerics import quantize, to_decimal
 from fxars.core.timeutil import UTC, format_ts, utcnow
 from fxars.domain.enums import EventImportance, Timeframe
 from fxars.domain.models import Candle, EconomicEvent, Instrument
-from fxars.instruments.calendar import TradingCalendar, default_holidays
+from fxars.instruments.calendar import (
+    TradingCalendar,
+    default_early_closes,
+    default_holidays,
+    default_metal_holidays,
+)
 
 BASE_PRICES: dict[str, Decimal] = {
     "EURUSD": Decimal("1.08500"),
@@ -67,7 +72,9 @@ def generate_candles(
     price = to_decimal(price)
 
     horizon_days = math.ceil(bars * tf.minutes / (60 * 24 * 5 / 7)) + 14
-    times = calendar.expected_bar_times(start, start + timedelta(days=horizon_days), tf)[:bars]
+    times = calendar.expected_bar_times(
+        start, start + timedelta(days=horizon_days), tf, instrument_id=instrument.instrument_id,
+    )[:bars]
     if len(times) < bars:
         raise ValueError("افق زمانی برای تولید تعداد کافی کندل کافی نیست.")
 
@@ -328,7 +335,11 @@ def generate_demo_bundle(output_dir: str | Path, *, instrument_ids: tuple[str, .
     from fxars.data.providers import write_candle_csv
     from fxars.instruments.spec import default_instruments
 
-    calendar = calendar or TradingCalendar(default_holidays())
+    calendar = calendar or TradingCalendar(
+        default_holidays(),
+        early_closes=default_early_closes(),
+        metal_holidays=default_metal_holidays(),
+    )
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
     specs = {instrument.instrument_id: instrument for instrument in default_instruments()}

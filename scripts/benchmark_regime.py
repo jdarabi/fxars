@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -16,8 +17,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from fxars.config.settings import Settings
+from fxars.data.synthetic import generate_demo_bundle
 from fxars.domain.enums import BacktestSegment
 from fxars.platform import Platform
+from fxars.storage.db import Database
 
 
 def _summary(result) -> dict:
@@ -59,6 +63,20 @@ def _delta(base: dict, filtered: dict) -> dict:
     }
 
 
+def _demo_platform(bars: int, seed: int) -> tuple[Platform, tempfile.TemporaryDirectory]:
+    """پلتفرم درون‌حافظه با داده دمو؛ پیش‌فرض امن برای آزمون و CI."""
+    tmp = tempfile.TemporaryDirectory(prefix="fxars-benchmark-")
+    settings = Settings.from_dict({"phase": "READ_ONLY", "db_path": ":memory:", "data_dir": tmp.name})
+    platform = Platform(settings, db=Database(":memory:"), sync_phase=False)
+    platform.bootstrap(create_users=False)
+    generate_demo_bundle(tmp.name, instrument_ids=("EURUSD",), bars=bars, seed=seed)
+    platform.ingest_csv(Path(tmp.name) / "EURUSD_H1.csv", instrument_id="EURUSD", timeframe="H1",
+                        source_id="demo_feed")
+    platform.ingest_csv(Path(tmp.name) / "DXY_H1.csv", instrument_id="DXY", timeframe="H1",
+                        source_id="demo_ref")
+    return platform, tmp
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Regime filter benchmark")
     parser.add_argument("--instrument", default="EURUSD")
@@ -66,10 +84,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--segment", default="ALL", choices=["ALL", "TRAIN", "VALIDATION", "LOCKED_TEST"])
     parser.add_argument("--out-dir", default=None)
     parser.add_argument("--no-fail-on-regression", action="store_true")
+    parser.add_argument("--db", default=None,
+                        help="پایگاه داده صریح؛ در صورت نبود، داده دمو در حافظه استفاده می‌شود")
+    parser.add_argument("--bars", type=int, default=4658, help="تعداد کندل دمو (بدون --db)")
+    parser.add_argument("--seed", type=int, default=7, help="Seed داده دمو (بدون --db)")
     args = parser.parse_args(argv)
 
-    platform = Platform()
-    platform.bootstrap(create_users=False)
+    tmp: tempfile.TemporaryDirectory | None = None
+    if args.db:
+        platform = Platform(Settings.from_dict({"phase": "READ_ONLY", "db_path": args.db}), sync_phase=False)
+        platform.bootstrap(create_users=False)
+    else:
+        platform, tmp = _demo_platform(args.bars, args.seed)
     try:
         print(f"Baseline: {args.instrument}/{args.timeframe} ({args.segment})")
         base = platform.run_backtest(
@@ -155,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     finally:
         platform.close()
+        if tmp is not None:
+            tmp.cleanup()
 
 
 if __name__ == "__main__":

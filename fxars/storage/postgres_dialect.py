@@ -63,6 +63,7 @@ KNOWN_PK: dict[str, tuple[str, ...]] = {
     "order_intents": ("intent_id",),
     "broker_orders": ("broker_order_id",),
     "fills": ("fill_id",),
+    "order_approvals": ("intent_id",),
     "model_registry": ("model_id", "version"),
     "locked_test_access": ("access_id",),
     "raw_payloads": ("payload_id",),

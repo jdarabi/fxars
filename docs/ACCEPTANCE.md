@@ -22,6 +22,25 @@ python -m fxars ac
 | AC-11 | خطای منبع/کهنگی ⇒ NO TRADE | `test_ac11_stale_data_yields_no_trade` | `DATA_STALE` |
 | AC-12 | مستندات نصب/پیکربندی/پشتیبان‌گیری تحویل شود | `test_ac12_operational_docs_exist` | README + docs/OPERATIONS |
 
+## معیارهای پذیرش سند تکمیلی ۱.۱
+
+| شناسه | معیار | آزمون | مدرک |
+|---|---|---|---|
+| AC-S01 | داده با DTS پایین وارد تصمیم نشود | `tests/test_decision_policy.py` | `DATA_UNTRUSTED` + `analysis_meta.data_trust` |
+| AC-S02 | عدم‌قطعیت بالاتر از سقف ⇒ NO TRADE | `tests/test_decision_policy.py` | `UNCERTAINTY_TOO_HIGH` |
+| AC-S03 | گراف شواهد و امتیاز ترکیبی سهم هر خانواده را ثبت کند | `tests/test_decision_policy.py` | `evidence_graph` + `composite_score` |
+| AC-S04 | زنجیره Provenance دست‌کاری‌ناپذیر باشد | `tests/test_governance.py` | `verify_chain.valid` و کشف tamper |
+| AC-S05 | فقط یک نسخه فعال از هر سیاست وجود داشته باشد | `tests/test_governance.py` | Policy Registry + Audit |
+| AC-S06 | مدل Tier 3 در MVP رد و Tier 2 بدون تأیید فعال نشود | `tests/test_governance.py` | Model Card validation |
+| AC-S07 | قفل ریسک سفارش را متوقف و فقط با دلیل آزاد کند | `tests/test_risk_lock.py` | `RISK_LOCK_ACTIVE` + تاریخچه |
+| AC-S08 | Kill Switch در هر سه سطح enforce شود | `tests/test_risk_lock.py` | `KILL_SWITCH_ACTIVE` |
+| AC-S09 | عبور از زیان هفتگی در دروازه رد شود | `tests/test_risk_lock.py` | `WEEKLY_LOSS_LIMIT` |
+| AC-S10 | سفارش خارج از سشن بازار رد شود | `tests/test_risk_lock.py` (GateSupplementTests) | `MARKET_CLOSED` |
+| AC-S11 | نتیجه بک‌تست بدون عبور از دروازه پذیرش منتشر نشود | `tests/test_acceptance_gates.py` | `research-gate --strict` |
+| AC-S12 | قابلیت‌های دفتر تصمیم/بازپخش/پیش‌مرگ/نقشه حرارتی/چالش کار کنند | `tests/test_intelligence.py` | رکوردهای ذخیره‌شده |
+| AC-S13 | APIهای هوشمندی و حاکمیت با مجوز و tenant درست پاسخ دهند | `tests/test_intelligence.py` (SupplementApiTests) | وضعیت ۲۰۰/۲۰۱ |
+| AC-S14 | تب «هوشمندی تصمیم» در داشبورد بارگذاری شود | بازبینی مرورگر (2026-11-12) | `GET /` + `loadIntelligence()`؛ تب نمایان و پر؛ ۴۰۳ سیاست/مدل برای ANALYST مطابق RBAC |
+
 ## پوشش تکمیلی
 
 | حوزه | فایل آزمون |
@@ -37,6 +56,11 @@ python -m fxars ac
 | پژوهش و بک‌تست | `tests/test_research.py` |
 | اجرا (فاز) | `tests/test_execution.py` |
 | API | `tests/test_api.py` |
+| سیاست تصمیم/اعتماد/عدم‌قطعیت | `tests/test_decision_policy.py` |
+| حاکمیت و منشأ تصمیم | `tests/test_governance.py` |
+| قفل ریسک و Kill Switch سطح‌دار | `tests/test_risk_lock.py` |
+| هوشمندی تصمیم (ژورنال/بازپخش/پیش‌مرگ/حرارتی/چالش) | `tests/test_intelligence.py` |
+| دروازه پذیرش پژوهش | `tests/test_acceptance_gates.py` |
 
 ## معیارهای عبور فازهای بعد (خلاصه)
 

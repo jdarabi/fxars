@@ -36,6 +36,7 @@ class ScenarioBuilder:
         *,
         run_id: str,
         rules_version: str,
+        tenant_id: str = "default",
     ) -> ScenarioBuildResult:
         if decision.action is DecisionAction.NO_TRADE or decision.direction is Direction.NEUTRAL:
             return ScenarioBuildResult(None, "NO_DIRECTIONAL_DECISION")
@@ -110,7 +111,8 @@ class ScenarioBuilder:
 
         scenario_id = stable_id(
             "sc", outcome.instrument.instrument_id, outcome.timeframe, decision.direction.value,
-            format(trigger, "f"), format(stop, "f"), outcome.as_of, length=24,
+            format(trigger, "f"), format(stop, "f"), outcome.as_of,
+            "" if tenant_id == "default" else tenant_id, length=24,
         )
         scenario = Scenario(
             scenario_id=scenario_id,
@@ -135,6 +137,7 @@ class ScenarioBuilder:
             rules_version=rules_version,
             config_hash=outcome.config_hash,
             strength=decision.strength,
+            tenant_id=tenant_id,
         )
         return ScenarioBuildResult(scenario, "CREATED")
 
@@ -144,7 +147,10 @@ class ScenarioBuilder:
         horizon = max(1, self.settings.scenario_expiry_bars)
         start = outcome.as_of + tf
         lookahead = tf * (horizon * 3) + timedelta(days=7)
-        times = self.calendar.expected_bar_times(start, start + lookahead, outcome.timeframe)
+        times = self.calendar.expected_bar_times(
+            start, start + lookahead, outcome.timeframe,
+            instrument_id=outcome.instrument.instrument_id,
+        )
         if len(times) >= horizon:
             return times[horizon - 1] + tf
         return outcome.as_of + tf * horizon

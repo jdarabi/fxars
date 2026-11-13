@@ -168,5 +168,26 @@ class AcceptabilityTests(unittest.TestCase):
         self.assertTrue(report.is_acceptable, f"ECE={report.ece}")
 
 
+class CalibrationReportVerdictTests(unittest.TestCase):
+    def test_small_sample_is_flagged_not_passed(self) -> None:
+        from fxars.research.report import _calibration_markdown_lines
+
+        text = "\n".join(_calibration_markdown_lines({"calibration": {"n": 3, "ece": 0.05}}))
+        self.assertIn("نمونه کافی نیست", text)
+        self.assertNotIn("مقدار فعلی: قابل قبول", text)
+
+    def test_large_sample_with_low_ece_is_acceptable(self) -> None:
+        from fxars.research.report import _calibration_markdown_lines
+
+        text = "\n".join(_calibration_markdown_lines({"calibration": {"n": 200, "ece": 0.05}}))
+        self.assertIn("مقدار فعلی: قابل قبول", text)
+
+    def test_large_sample_with_high_ece_is_flagged(self) -> None:
+        from fxars.research.report import _calibration_markdown_lines
+
+        text = "\n".join(_calibration_markdown_lines({"calibration": {"n": 200, "ece": 0.67}}))
+        self.assertIn("نمایش داده نمی‌شود", text)
+
+
 if __name__ == "__main__":
     unittest.main()

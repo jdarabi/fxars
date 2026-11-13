@@ -17,7 +17,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from fxars.domain.enums import OrderStatus, OrderType, Phase, Side
-from fxars.domain.models import OrderIntent
+from fxars.domain.models import BrokerOrder, OrderIntent
 
 
 def _make_intent(
@@ -56,6 +56,9 @@ def _install_fake_mt5(*, is_demo: bool = True, has_account: bool = True) -> type
         "symbol": None,
         "tick": None,
         "order_result": None,
+        "history_orders": [],
+        "history_deals": [],
+        "positions": [],
     }
 
     # --- constants (match MT5 SDK) ---
@@ -79,6 +82,16 @@ def _install_fake_mt5(*, is_demo: bool = True, has_account: bool = True) -> type
 
     fake.TRADE_ACTION_DEAL = 1
     fake.TRADE_ACTION_SLTP = 6
+    fake.TRADE_ACTION_REMOVE = 8
+
+    fake.ORDER_STATE_CANCELED = 2
+    fake.ORDER_STATE_PARTIAL = 3
+    fake.ORDER_STATE_FILLED = 4
+    fake.ORDER_STATE_REJECTED = 5
+    fake.ORDER_STATE_EXPIRED = 6
+
+    fake.POSITION_TYPE_BUY = 0
+    fake.POSITION_TYPE_SELL = 1
 
     fake.TRADE_RETCODE_DONE = 10009
     fake.TRADE_RETCODE_REQUOTE = 10004
@@ -118,10 +131,43 @@ def _install_fake_mt5(*, is_demo: bool = True, has_account: bool = True) -> type
             order=order, comment=comment,
         )
 
+    def set_history_order(**kwargs):
+        defaults = dict(
+            ticket=1234567, symbol="EURUSD", type=0, magic=20261106,
+            volume_initial=0.10, volume_current=0.0, state=4,
+            price_open=1.09, price_current=1.0901, comment="",
+            time_setup=1767225600, time_done=1767225601, position_id=555001,
+        )
+        defaults.update(kwargs)
+        state["history_orders"].append(types.SimpleNamespace(**defaults))
+        return defaults
+
+    def set_history_deal(**kwargs):
+        defaults = dict(
+            ticket=900001, order=1234567, symbol="EURUSD", volume=0.10,
+            price=1.0901, commission=-0.70, swap=0.0, profit=0.0,
+            time=1767225601, entry=0, position_id=555001, type=0, magic=20261106,
+        )
+        defaults.update(kwargs)
+        state["history_deals"].append(types.SimpleNamespace(**defaults))
+        return defaults
+
+    def set_position(**kwargs):
+        defaults = dict(
+            ticket=555001, symbol="EURUSD", type=0, volume=0.10,
+            price_open=1.09, price_current=1.091, profit=10.0,
+        )
+        defaults.update(kwargs)
+        state["positions"].append(types.SimpleNamespace(**defaults))
+        return defaults
+
     fake._set_account = set_account
     fake._set_symbol = set_symbol
     fake._set_tick = set_tick
     fake._set_order_result = set_order_result
+    fake._set_history_order = set_history_order
+    fake._set_history_deal = set_history_deal
+    fake._set_position = set_position
     fake._state = state
 
     # --- API ---
@@ -156,6 +202,29 @@ def _install_fake_mt5(*, is_demo: bool = True, has_account: bool = True) -> type
         state["last_order_request"] = request
         return state["order_result"]
 
+    def history_orders_get(*args, **kwargs):
+        if "ticket" in kwargs:
+            return [o for o in state["history_orders"] if o.ticket == kwargs["ticket"]] or None
+        start, end = args[0], args[1]
+        low, high = start.timestamp(), end.timestamp()
+        return [o for o in state["history_orders"] if low <= o.time_setup <= high] or None
+
+    def history_deals_get(*args, **kwargs):
+        start, end = args[0], args[1]
+        low, high = start.timestamp(), end.timestamp()
+        return [d for d in state["history_deals"] if low <= d.time <= high] or None
+
+    def positions_get(*args, **kwargs):
+        items = state["positions"]
+        if "ticket" in kwargs:
+            items = [p for p in items if p.ticket == kwargs["ticket"]]
+        if "symbol" in kwargs:
+            items = [p for p in items if p.symbol == kwargs["symbol"]]
+        return tuple(items)
+
+    fake.history_orders_get = history_orders_get
+    fake.history_deals_get = history_deals_get
+    fake.positions_get = positions_get
     fake.initialize = initialize
     fake.shutdown = shutdown
     fake.last_error = last_error
@@ -367,15 +436,141 @@ class SubmitSuccessTests(_MT5BrokerTestBase):
 # 4. query
 # ===========================================================================
 class QueryTests(_MT5BrokerTestBase):
-    def test_query_returns_none(self):
+    def setUp(self):
+        super().setUp()
         self.fake._set_account(login=222, server="Alpari-MT5-Demo", balance=100000.0, trade_mode=1)
+
+    def test_query_returns_none_without_history(self):
         MT5Broker, _ = self._import_broker()
         broker = MT5Broker()
         self.assertIsNone(broker.query("any-client-id"))
 
+    def test_query_intent_finds_filled_order_and_fills(self):
+        intent = _make_intent(client_order_id="rec-1", volume="0.10")
+        self.fake._set_history_order(ticket=777001, state=4, volume_initial=0.10, volume_current=0.0)
+        self.fake._set_history_deal(order=777001, volume=0.10, price=1.0901, commission=-0.70)
+        MT5Broker, _ = self._import_broker()
+        broker = MT5Broker()
+        details = broker.query_intent(intent)
+        self.assertIsNotNone(details)
+        order, fills = details
+        self.assertEqual(order.broker_order_id, "777001")
+        self.assertEqual(order.status, OrderStatus.FILLED)
+        self.assertEqual(order.filled_volume, Decimal("0.10"))
+        self.assertEqual(order.average_price, Decimal("1.0901"))
+        self.assertEqual(len(fills), 1)
+        self.assertEqual(fills[0].commission, Decimal("-0.70"))
+
+    def test_query_intent_ignores_other_symbol(self):
+        intent = _make_intent(client_order_id="rec-2")
+        self.fake._set_history_order(ticket=777002, symbol="GBPUSD")
+        MT5Broker, _ = self._import_broker()
+        broker = MT5Broker()
+        self.assertIsNone(broker.query_intent(intent))
+
+    def test_query_by_ticket(self):
+        self.fake._set_history_order(ticket=777003, state=2, volume_initial=0.10, volume_current=0.10)
+        MT5Broker, _ = self._import_broker()
+        broker = MT5Broker()
+        order = broker.query("777003")
+        self.assertIsNotNone(order)
+        self.assertEqual(order.status, OrderStatus.CANCELED)
+
+
+class CloseCancelTests(_MT5BrokerTestBase):
+    def setUp(self):
+        super().setUp()
+        self.fake._set_account(login=222, server="Alpari-MT5-Demo", balance=100000.0, trade_mode=1)
+        self.fake._set_symbol()
+        self.fake._set_tick(ask=1.09005, bid=1.08995)
+
+    def test_close_position_sends_opposite_deal(self):
+        self.fake._set_position(ticket=555001, type=0, volume=0.10)
+        self.fake._set_order_result(retcode=10009, volume=0.10, price=1.08995, order=777100)
+        MT5Broker, _ = self._import_broker()
+        broker = MT5Broker()
+        order, fills = broker.close_position(555001)
+        req = self.fake._state["last_order_request"]
+        self.assertEqual(req["position"], 555001)
+        self.assertEqual(req["type"], self.fake.ORDER_TYPE_SELL)
+        self.assertEqual(order.status, OrderStatus.FILLED)
+        self.assertEqual(len(fills), 1)
+
+    def test_close_position_missing_raises(self):
+        MT5Broker, MT5BrokerError = self._import_broker()
+        broker = MT5Broker()
+        with self.assertRaises(MT5BrokerError):
+            broker.close_position(999999)
+
+    def test_cancel_order_uses_remove_action(self):
+        self.fake._set_order_result(retcode=10009, volume=0.0, price=0.0, order=0)
+        MT5Broker, _ = self._import_broker()
+        broker = MT5Broker()
+        self.assertTrue(broker.cancel_order(777200))
+        req = self.fake._state["last_order_request"]
+        self.assertEqual(req["action"], self.fake.TRADE_ACTION_REMOVE)
+        self.assertEqual(req["order"], 777200)
+
 
 # ===========================================================================
-# 5. shutdown
+# 5. closed_position (تاریخچه بسته‌شدن)
+# ===========================================================================
+class ClosedPositionHistoryTests(_MT5BrokerTestBase):
+    def setUp(self):
+        super().setUp()
+        self.fake._set_account(login=222, server="Alpari-MT5-Demo", balance=100000.0, trade_mode=1)
+
+    def _broker_order(self) -> BrokerOrder:
+        return BrokerOrder(
+            broker_order_id="1234567", intent_id="oi_test-1", status=OrderStatus.FILLED,
+            symbol="EURUSD", requested_volume=Decimal("0.10"), filled_volume=Decimal("0.10"),
+            average_price=Decimal("1.0900"), updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+
+    def test_reads_out_deals(self):
+        self.fake._set_history_order(ticket=1234567, position_id=555001)
+        self.fake._set_history_deal(ticket=900001, order=1234567, entry=0, position_id=555001,
+                                    volume=0.10, price=1.09000, commission=-0.70, profit=0.0)
+        self.fake._set_history_deal(ticket=900002, order=999001, entry=1, position_id=555001,
+                                    type=1, volume=0.10, price=1.09500, commission=-0.30,
+                                    swap=-0.20, profit=50.0, time=1767229200)
+        MT5Broker, _ = self._import_broker()
+        close = MT5Broker().closed_position(_make_intent(), self._broker_order())
+        self.assertIsNotNone(close)
+        self.assertEqual(close.position_id, "555001")
+        self.assertEqual(close.volume, Decimal("0.10"))
+        self.assertEqual(close.exit_price, Decimal("1.09500"))
+        self.assertEqual(close.gross_profit, Decimal("50.0"))
+        self.assertEqual(close.commission, Decimal("-1.00"))
+        self.assertEqual(close.swap, Decimal("-0.20"))
+        self.assertEqual(close.deal_ids, ("900001", "900002"))
+
+    def test_returns_none_without_out_deal(self):
+        self.fake._set_history_order(ticket=1234567, position_id=555001)
+        self.fake._set_history_deal(ticket=900001, order=1234567, entry=0, position_id=555001)
+        MT5Broker, _ = self._import_broker()
+        self.assertIsNone(MT5Broker().closed_position(_make_intent(), self._broker_order()))
+
+    def test_fallback_matches_order_without_numeric_ticket(self):
+        self.fake._set_history_deal(ticket=900001, order=888001, entry=0, position_id=555001)
+        self.fake._set_history_deal(ticket=900002, order=888002, entry=1, position_id=555001,
+                                    type=1, volume=0.10, price=1.10000, profit=100.0,
+                                    time=1767229200)
+        order = self._broker_order()
+        object.__setattr__(order, "broker_order_id", "bo_unknown")
+        MT5Broker, _ = self._import_broker()
+        close = MT5Broker().closed_position(_make_intent(), order)
+        self.assertIsNotNone(close)
+        self.assertEqual(close.position_id, "555001")
+
+    def test_no_history_api_returns_none(self):
+        del self.fake.history_deals_get
+        MT5Broker, _ = self._import_broker()
+        self.assertIsNone(MT5Broker().closed_position(_make_intent(), self._broker_order()))
+
+
+# ===========================================================================
+# 6. shutdown
 # ===========================================================================
 class ShutdownTests(_MT5BrokerTestBase):
     def test_shutdown_calls_mt5(self):

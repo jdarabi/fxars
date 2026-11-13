@@ -93,6 +93,19 @@ python -m fxars killswitch off --reason "رفع مشکل" --actor operator
 2. با `client_order_id` در بروکر جست‌وجو کنید؛ ارسال مجدد کورکورانه ممنوع.
 3. نتیجه را ثبت و Audit کنید.
 
+**مدیریت مستاجر و ممیزی امنیت (فاز ۷)**
+```powershell
+python -m fxars tenants list
+python -m fxars tenants create --tenant acme --name "ACME" --plan pro --actor admin
+python -m fxars tenants set-plan --tenant acme --plan enterprise --actor admin
+python -m fxars security-audit --tenant default
+python -m fxars security-audit --json
+```
+- تغییر پلن/سهمیه و ساخت مستاجر در Audit با `CONFIG_CHANGED` ثبت می‌شود.
+- `security-audit` در صورت `fail` با کد خروج غیرصفر برمی‌گردد؛ بررسی کلید امنیتی در محیط `dev` فقط `warn` است.
+- خروجی داده/گزارش نگهداری: `GET /api/v1/tenant/export` و `/api/v1/tenant/retention` (مدیر: `/api/v1/tenants/{id}/...`).
+- حذف داده مستاجر خودکار نیست؛ پیش از هر حذف، پشتیبان بگیرید و دستور صریح اپراتور ثبت کنید.
+
 ## ۷. ارتقا
 
 1. پشتیبان + آزمون Restore.

@@ -26,6 +26,7 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
         Permission.SCENARIO_READ,
         Permission.RISK_EVALUATE,
         Permission.RISK_POLICY_WRITE,
+        Permission.EXECUTION_APPROVE,
         Permission.KILLSWITCH_TOGGLE,
         Permission.AUDIT_READ,
         Permission.REPORT_READ,

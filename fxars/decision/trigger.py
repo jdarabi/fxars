@@ -1,4 +1,4 @@
-"""ارزیاب شرط ورود/ابطال/انقضای سناریو روی داده بسته‌شده و تازه."""
+﻿"""ارزیاب شرط ورود/ابطال/انقضای سناریو روی داده بسته‌شده و تازه."""
 
 from __future__ import annotations
 
@@ -42,19 +42,22 @@ class TriggerEvaluator:
             return TriggerOutcome(ScenarioStatus.EXPIRED, "expired",
                                   f"زمان انقضای سناریو ({format_ts(scenario.expiry_at)}) رسیده است.", data_ref)
 
-        if self.calendar.is_stale(last.available_at, now, tf, grace_seconds=300, max_age_bars=self.settings.max_evidence_age_bars):
+        if self.calendar.is_stale(last.available_at, now, tf, instrument_id=last.instrument_id,
+                                  grace_seconds=300, max_age_bars=self.settings.max_evidence_age_bars):
             return TriggerOutcome(None, "stale_data", "داده بازار کهنه است؛ ارزیابی سناریو متوقف شد.", data_ref)
 
-        condition = scenario.invalidation_condition or {}
-        condition_type = condition.get("type")
-        level = to_decimal(condition.get("level", "0"))
-        if condition_type == "close_below" and last.close <= level:
-            return TriggerOutcome(ScenarioStatus.INVALIDATED, "invalidated",
-                                  f"شرط ابطال محقق شد: بسته‌شدن زیر {format(level, 'f')}.", data_ref)
-        if condition_type == "close_above" and last.close >= level:
-            return TriggerOutcome(ScenarioStatus.INVALIDATED, "invalidated",
-                                  f"شرط ابطال محقق شد: بسته‌شدن بالای {format(level, 'f')}.", data_ref)
 
+        # FIX-DUAL: invalidation_condition بازگردانده شد.
+        if scenario.status in (ScenarioStatus.WATCH, ScenarioStatus.ARMED):
+            condition = scenario.invalidation_condition or {}
+            condition_type = condition.get("type")
+            level = to_decimal(condition.get("level", "0"))
+            if condition_type == "close_below" and last.close <= level:
+                return TriggerOutcome(ScenarioStatus.INVALIDATED, "invalidated",
+                                      f"شرط ابطال محقق شد: بسته‌شدن زیر {format(level, 'f')}.", data_ref)
+            if condition_type == "close_above" and last.close >= level:
+                return TriggerOutcome(ScenarioStatus.INVALIDATED, "invalidated",
+                                      f"شرط ابطال محقق شد: بسته‌شدن بالای {format(level, 'f')}.", data_ref)
         entry = scenario.entry_condition or {}
         entry_type = entry.get("type")
         entry_level = to_decimal(entry.get("level", "0"))

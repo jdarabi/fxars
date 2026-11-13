@@ -1,4 +1,4 @@
-"""سرویس اجرا (MVP-2+): در MVP-1 هیچ مسیر ارسال سفارش فعال نیست.
+﻿"""سرویس اجرا (MVP-2+): در MVP-1 هیچ مسیر ارسال سفارش فعال نیست.
 
 Phase Guard و Risk Gate هر دو در سطح سرویس enforce می‌شوند؛ API یا job جانبی
 نمی‌تواند این لایه را دور بزند (AC-05).
@@ -14,13 +14,21 @@ from typing import Any
 from fxars.audit.audit import AuditAction, AuditLog
 from fxars.audit.outbox import EventType, Outbox
 from fxars.config.settings import Settings
-from fxars.core.errors import PhaseViolationError, RiskRejectedError, ValidationError
+from fxars.core.errors import NotFoundError, PhaseViolationError, RiskRejectedError, ValidationError
 from fxars.core.ids import new_id, stable_id
 from fxars.domain.enums import OrderStatus, Phase, Side
 from fxars.domain.models import OrderIntent, RiskDecision
 from fxars.execution.state_machine import transition
 from fxars.risk.killswitch import KillSwitch
 from fxars.storage.repositories import OrderRepository, RiskRepository, ScenarioRepository
+
+
+def _scenario_status_check_required(settings) -> bool:
+    """FIX-DUAL: در فازهای خودکار، سناریو باید TRIGGERED باشد."""
+    from fxars.domain.enums import Phase
+    return settings.phase in {
+        Phase.PAPER, Phase.DEMO, Phase.ASSISTED, Phase.AUTOMATED_LIMITED,
+    }
 
 
 class ExecutionService:
@@ -36,6 +44,8 @@ class ExecutionService:
         audit: AuditLog,
         outbox: Outbox,
         broker: Any = None,
+        approvals: Any = None,
+        scenario_gate: Callable[[], bool] | None = None,
     ) -> None:
         self.settings = settings
         self.clock = clock
@@ -46,6 +56,8 @@ class ExecutionService:
         self.audit = audit
         self.outbox = outbox
         self.broker = broker
+        self.approvals = approvals
+        self.scenario_gate = scenario_gate
 
     @property
     def phase(self) -> Phase:
@@ -58,6 +70,7 @@ class ExecutionService:
         *,
         client_order_id: str | None = None,
         actor: str = "system",
+        tenant_id: str | None = None,
     ) -> OrderIntent:
         if not self.settings.execution_enabled:
             self.audit.append(
@@ -70,7 +83,49 @@ class ExecutionService:
             )
         self.killswitch.assert_inactive()
 
+        # FIX-DUAL: فقط سناریوی TRIGGERED مجاز به ساخت OrderIntent است
+        requires_triggered = (
+            bool(self.scenario_gate())
+            if self.scenario_gate is not None
+            else _scenario_status_check_required(self.settings)
+        )
+        if requires_triggered:
+            from fxars.domain.enums import Phase as _P
+            from fxars.domain.enums import ScenarioStatus as _SS
+            scenario_pre = self.scenarios.get(scenario_id)
+            # FIX-DUAL: PAPER auto-trigger
+            if (
+                self.settings.phase is _P.PAPER
+                and scenario_pre.status in (_SS.WATCH, _SS.ARMED)
+            ):
+                now_pre = self.clock()
+                promoted = scenario_pre.with_status(_SS.TRIGGERED, when=now_pre)
+                self.scenarios.save(promoted)
+                self.audit.append(
+                    "SCENARIO_TRANSITION", "scenario", scenario_id, actor=actor,
+                    payload={
+                        "from": scenario_pre.status.value,
+                        "to": _SS.TRIGGERED.value,
+                        "event": "paper_auto_trigger",
+                    },
+                )
+                scenario_pre = promoted
+            if scenario_pre.status is not _SS.TRIGGERED:
+                self.audit.append(
+                    "ORDER_INTENT_BLOCKED", "scenario", scenario_id, actor=actor,
+                    payload={
+                        "reason": "SCENARIO_NOT_TRIGGERED",
+                        "status": scenario_pre.status.value,
+                    },
+                )
+                raise PhaseViolationError(
+                    "ساخت OrderIntent فقط برای سناریوی TRIGGERED مجاز است.",
+                    details={"status": scenario_pre.status.value},
+                )
+
         scenario = self.scenarios.get(scenario_id)
+        if tenant_id is not None and scenario.tenant_id != tenant_id:
+            raise NotFoundError(f"سناریو {scenario_id} یافت نشد.", details={"scenario_id": scenario_id})
         if scenario.risk_decision_id is None:
             raise RiskRejectedError("سناریو RiskDecision تأییدشده ندارد.")
         decision: RiskDecision = self.decisions.get(scenario.risk_decision_id)
@@ -112,6 +167,7 @@ class ExecutionService:
             created_at=now,
             status=OrderStatus.INTENT_CREATED,
             phase=self.phase,
+            tenant_id=scenario.tenant_id,
         )
         intent = transition(intent, OrderStatus.RISK_APPROVED)
         with self.orders.db.transaction():
@@ -142,13 +198,30 @@ class ExecutionService:
         pip_size: Decimal,
         actor: str = "system",
     ) -> OrderIntent:
+        # FIX-DUAL: در ADVISOR هیچ ارسالی مجاز نیست
+        if self.phase.is_advisor_mode:
+            raise PhaseViolationError(
+                "ارسال سفارش در فاز مشاور (ADVISOR/READ_ONLY) مجاز نیست.",
+                details={"phase": self.phase.value},
+            )
         if self.phase is Phase.READ_ONLY:
             raise PhaseViolationError("ارسال سفارش در فاز Read-only ممنوع است.")
         self.killswitch.assert_inactive()
 
+        # FIX-DUAL: در submit وضعیت سناریو از intent خوانده میشود
+
         intent = self.orders.get_intent(intent_id)
         if intent is None:
             raise ValidationError("OrderIntent یافت نشد.")
+
+        # پاسخ‌گویی چهارچشمی: در ASSISTED هیچ ارسالی بدون تأیید اپراتور دیگر مجاز نیست.
+        if self.phase is Phase.ASSISTED:
+            if self.approvals is None:
+                raise PhaseViolationError(
+                    "سرویس تأیید در فاز ASSISTED پیکربندی نشده است؛ ارسال مسدود شد.",
+                    details={"phase": self.phase.value},
+                )
+            self.approvals.require_approved(intent_id, now=self.clock())
 
         # FIX-P0-4: re-check decision TTL at submission time
         decision = self.decisions.get(intent.risk_decision_id)

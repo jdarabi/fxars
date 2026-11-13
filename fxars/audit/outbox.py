@@ -30,6 +30,7 @@ class EventType:
     BACKTEST_COMPLETED = "research.backtest.completed"
     KILL_SWITCH_CHANGED = "system.kill_switch.changed"
     ORDER_INTENT_CREATED = "execution.order_intent.created"
+    TRADE_CLOSED = "execution.trade.closed"
 
 
 class Outbox:

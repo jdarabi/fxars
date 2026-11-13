@@ -41,8 +41,11 @@ class IntermarketModule:
                     continue
                 if reference.available_at > candle.available_at:
                     continue
-                main_return = float((candle.close - previous.close) / previous.close) if previous.close else 0.0
-                ref_return = float((reference.close - reference_previous.close) / reference_previous.close) if reference_previous.close else 0.0
+                # FIX-09-NO-ZERO-RETURN: اگر close صفر باشد، ردیف را رد کن (نه بازده جعلی صفر)
+                if not previous.close or not reference_previous.close:
+                    continue
+                main_return = float((candle.close - previous.close) / previous.close)
+                ref_return = float((reference.close - reference_previous.close) / reference_previous.close)
                 main_returns.append(main_return)
                 ref_returns.append(ref_return)
                 aligned.append((index, main_return, ref_return))
@@ -105,6 +108,8 @@ def latest_correlation(context: AnalysisContext, reference_id: str) -> float | N
         item = by_time.get(candle.open_time)
         item_previous = by_time.get(previous.open_time)
         if item is None or item_previous is None or item.available_at > candle.available_at:
+            continue
+        if not previous.close or not item_previous.close:
             continue
         main.append(float((candle.close - previous.close) / previous.close))
         ref.append(float((item.close - item_previous.close) / item_previous.close))

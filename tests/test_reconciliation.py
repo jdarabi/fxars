@@ -14,7 +14,7 @@ if str(_ROOT) not in sys.path:
 from fxars.audit.audit import AuditLog
 from fxars.audit.outbox import Outbox
 from fxars.domain.enums import OrderStatus, OrderType, Phase, Side
-from fxars.domain.models import OrderIntent
+from fxars.domain.models import BrokerOrder, Fill, OrderIntent
 from fxars.execution.reconciliation import ReconciliationService
 from fxars.storage.db import Database
 from fxars.storage.repositories import OrderRepository
@@ -23,6 +23,34 @@ from fxars.storage.repositories import OrderRepository
 class _NullBroker:
     def query(self, client_order_id: str):
         return None
+
+
+class _FilledBroker:
+    """بروکر ساختگی که سفارش UNKNOWN را در history پیدا می‌کند."""
+
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def query_intent(self, intent: OrderIntent):
+        order = BrokerOrder(
+            broker_order_id="777001",
+            intent_id=intent.intent_id,
+            status=OrderStatus.FILLED,
+            symbol=intent.instrument_id,
+            requested_volume=intent.volume,
+            filled_volume=intent.volume,
+            average_price=Decimal("1.0901"),
+            updated_at=self.now,
+        )
+        fill = Fill(
+            fill_id="fill_777001",
+            broker_order_id="777001",
+            volume=intent.volume,
+            price=Decimal("1.0901"),
+            commission=Decimal("-0.70"),
+            filled_at=self.now,
+        )
+        return order, [fill]
 
 
 class ReconciliationTests(unittest.TestCase):
@@ -84,6 +112,30 @@ class ReconciliationTests(unittest.TestCase):
         entries = self.audit.list_entries(limit=100)
         actions = [e.action for e in entries]
         self.assertIn("RECONCILIATION_REQUIRED", actions)
+
+    def test_filled_broker_persists_order_and_fills(self):
+        intent = self._save_unknown("filled-1")
+        svc = ReconciliationService(
+            orders=self.orders, broker=_FilledBroker(self.now),
+            audit=self.audit, outbox=self.outbox, clock=lambda: self.now,
+        )
+        results = svc.reconcile_all()
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].to_status, OrderStatus.FILLED)
+        self.assertEqual(self.orders.get_intent(intent.intent_id).status, OrderStatus.FILLED)
+
+        broker_orders = self.db.query(
+            "SELECT 1 FROM broker_orders WHERE intent_id=?", (intent.intent_id,),
+        )
+        fills = self.db.query(
+            "SELECT 1 FROM fills WHERE broker_order_id='777001'",
+        )
+        self.assertEqual(len(broker_orders), 1)
+        self.assertEqual(len(fills), 1)
+
+        entries = self.audit.list_entries(limit=100)
+        completed = [e for e in entries if e.action == "RECONCILIATION_COMPLETED"]
+        self.assertEqual(len(completed), 1)
 
 
 if __name__ == "__main__":

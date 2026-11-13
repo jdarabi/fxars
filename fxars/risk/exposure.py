@@ -22,13 +22,15 @@ def currency_exposures(
     positions: list[Position],
     instruments: dict[str, Instrument],
     rates: dict[str, Decimal],
+    *,
+    account_currency: str = "USD",
 ) -> dict[str, Decimal]:
     exposures: dict[str, Decimal] = {}
     for position in positions:
         instrument = instruments.get(position.instrument_id)
         if instrument is None:
             continue
-        rate = _rate(instrument, rates)
+        rate = _rate(instrument, rates, account_currency)
         margin = position_margin(position, instrument, rate)
         sign = 1 if position.side.value == "BUY" else -1
         exposures[instrument.base_currency] = exposures.get(instrument.base_currency, ZERO) + margin * sign
@@ -42,8 +44,10 @@ def candidate_exposures(
     price: Decimal,
     side: str,
     rates: dict[str, Decimal],
+    *,
+    account_currency: str = "USD",
 ) -> dict[str, Decimal]:
-    rate = _rate(instrument, rates)
+    rate = _rate(instrument, rates, account_currency)
     margin = margin_required(instrument, volume, price, rate)
     sign = 1 if side.upper() == "BUY" else -1
     return {instrument.base_currency: margin * sign, instrument.quote_currency: -margin * sign}
@@ -58,9 +62,14 @@ def combined_currency_ok(
     price: Decimal,
     side: str,
     limit: Decimal,
+    *,
+    account_currency: str = "USD",
 ) -> tuple[bool, dict[str, Decimal]]:
-    exposures = currency_exposures(positions, instruments, rates)
-    for currency, amount in candidate_exposures(instrument, volume, price, side, rates).items():
+    exposures = currency_exposures(positions, instruments, rates, account_currency=account_currency)
+    candidate = candidate_exposures(
+        instrument, volume, price, side, rates, account_currency=account_currency,
+    )
+    for currency, amount in candidate.items():
         exposures[currency] = exposures.get(currency, ZERO) + amount
     worst = max((abs(value) for value in exposures.values()), default=ZERO)
     return worst <= limit, exposures
@@ -72,6 +81,8 @@ def correlated_margin(
     rates: dict[str, Decimal],
     correlations: dict[str, float],
     threshold: float,
+    *,
+    account_currency: str = "USD",
 ) -> Decimal:
     total = ZERO
     for position in positions:
@@ -80,11 +91,21 @@ def correlated_margin(
             continue
         correlation = abs(correlations.get(position.instrument_id, 0.0))
         if correlation >= threshold:
-            total += position_margin(position, instrument, _rate(instrument, rates))
+            total += position_margin(
+                position, instrument, _rate(instrument, rates, account_currency),
+            )
     return total
 
 
-def _rate(instrument: Instrument, rates: dict[str, Decimal]) -> Decimal:
-    if instrument.quote_currency.upper() == "USD":
+def _rate(instrument: Instrument, rates: dict[str, Decimal], account_currency: str = "USD") -> Decimal:
+    """نرخ تبدیل quote به ارز حساب؛ نبود/صفر بودن نرخ باید Fail-Closed باشد."""
+    quote = instrument.quote_currency.upper()
+    if quote == account_currency.upper():
         return Decimal("1")
-    return to_decimal(rates.get(instrument.quote_currency, "1"))
+    value = rates.get(quote)
+    if value is None:
+        raise ValueError(f"نرخ تبدیل {quote}->{account_currency} موجود نیست.")
+    rate = to_decimal(value)
+    if rate <= ZERO:
+        raise ValueError(f"نرخ تبدیل {quote}->{account_currency} نامعتبر است.")
+    return rate

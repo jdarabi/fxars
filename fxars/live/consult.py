@@ -1,4 +1,4 @@
-"""Consultant: live advisor with optional AutoTrade (MT5 demo)."""
+﻿"""Consultant: live advisor with optional AutoTrade (MT5 demo)."""
 from __future__ import annotations
 
 import argparse
@@ -134,9 +134,9 @@ class Consultant:
                             self._notify(symbol, tf, advice)
 
                 except MT5UnavailableError as exc:
-                    print(f"[{symbol:8s}/{tf:3s}] MT5 error: {exc}", file=sys.stderr)
+                    logger.warning("%s/%s MT5 error: %s", symbol, tf, exc)
                 except Exception as exc:
-                    print(f"[{symbol:8s}/{tf:3s}] {type(exc).__name__}: {exc}", file=sys.stderr)
+                    logger.warning("%s/%s %s: %s", symbol, tf, type(exc).__name__, exc)
 
         # Apply trailing SL to all positions (FIX-08: single call)
         n_updated = _apply_trailing_sl(40)
@@ -386,7 +386,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         while True:
             cycles += 1
-            print(f"\n--- Cycle {cycles} @ {datetime.now().strftime('%H:%M:%S')} ---", file=sys.stderr)
+            print(f"\n--- Cycle {cycles} @ {datetime.now(tz=UTC).strftime('%H:%M:%S')} ---", file=sys.stderr)
             consultant.run_once()
             if args.max_cycles and cycles >= args.max_cycles:
                 print(f"Reached max_cycles={args.max_cycles}", file=sys.stderr)
@@ -406,3 +406,7 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+# FIX-10-PRINT-TO-LOGGER
+
+# FIX-11-DATETIME-UTC
