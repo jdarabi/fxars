@@ -448,8 +448,20 @@ td.num,th.num{font-variant-numeric:tabular-nums;direction:ltr;text-align:left}
             <option>VALIDATION</option>
             <option>LOCKED_TEST</option>
           </select></div>
+          <div><label>استراتژی</label>
+            <select id="btStrategy">
+              <option value="">سناریوی شاهد-محور (پیش‌فرض)</option>
+              <option value="SMC/Structure">SMC/Structure</option>
+              <option value="Trend/EMA">Trend/EMA</option>
+              <option value="MeanRev/RSI">MeanRev/RSI</option>
+              <option value="Breakout/Donchian">Breakout/Donchian</option>
+              <option value="EMA20/FullBody">EMA20/FullBody</option>
+              <option value="H&amp;S/Reversal">H&amp;S/Reversal</option>
+            </select>
+          </div>
           <button onclick="runBacktest()">اجرا</button>
           <button class="ghost" onclick="runBacktestMultiTf()">مقایسه همه TFها</button>
+          <button class="ghost" onclick="runBacktestMultiStrategy()">مقایسه استراتژی‌ها</button>
         </div>
         <div id="btResult" style="margin-top:12px" class="muted">—</div>
       </div>
@@ -2422,7 +2434,7 @@ async function runBacktest() {
     $("btResult").innerHTML = "<span class='muted'>اجرا...</span>";
     const data = await api("/api/v1/backtests", {
       method: "POST",
-      body: JSON.stringify({ instrument_id: $("btInstrument").value, timeframe: $("btTimeframe").value, segment: $("btSegment").value }),
+      body: JSON.stringify({ instrument_id: $("btInstrument").value, timeframe: $("btTimeframe").value, segment: $("btSegment").value, strategy: (($("btStrategy") && $("btStrategy").value) || null) }),
     });
     $("btResult").innerHTML = `<div class="kv">
       <b>معاملات</b><span>${esc(data.run.metrics.trade_count)}</span>
@@ -2499,6 +2511,55 @@ function renderMultiTfTable(results) {
     </table>
     ${summary}`;
 }
+
+// ==================== Multi-Strategy Backtest ====================
+
+async function runBacktestMultiStrategy() {
+  const instrument = $("btInstrument").value;
+  const timeframe = $("btTimeframe").value;
+  const segment = $("btSegment").value;
+  const strategies = [
+    { value: "", label: "سناریوی شاهد-محور" },
+    { value: "SMC/Structure", label: "SMC/Structure" },
+    { value: "Trend/EMA", label: "Trend/EMA" },
+    { value: "MeanRev/RSI", label: "MeanRev/RSI" },
+    { value: "Breakout/Donchian", label: "Breakout/Donchian" },
+    { value: "EMA20/FullBody", label: "EMA20/FullBody" },
+    { value: "H&S/Reversal", label: "H&S/Reversal" },
+  ];
+  const results = [];
+  $("btResult").innerHTML = `<span class='muted'>در حال اجرا برای ${strategies.length} استراتژی...</span>`;
+  for (const s of strategies) {
+    try {
+      const body = { instrument_id: instrument, timeframe: timeframe, segment: segment };
+      if (s.value) body.strategy = s.value;
+      const data = await api("/api/v1/backtests", { method: "POST", body: JSON.stringify(body) });
+      const m = data.run.metrics;
+      results.push({ label: s.label, value: s.value, trades: m.trade_count, net: m.net_profit, pf: m.profit_factor, sharpe: m.sharpe, maxdd: m.max_drawdown_pct, costs: m.costs ? m.costs.total : null });
+    } catch (e) {
+      results.push({ label: s.label, value: s.value, error: e.message });
+    }
+  }
+  renderMultiStrategyTable(results);
+}
+
+function renderMultiStrategyTable(results) {
+  const rows = results.map(r => {
+    if (r.error) return `<tr><td>${esc(r.label)}</td><td colspan="6" class="neg">❌ ${esc(r.error)}</td></tr>`;
+    const pf = r.pf == null ? "—" : Number(r.pf).toFixed(2);
+    const costs = r.costs == null ? "—" : Number(r.costs).toFixed(2);
+    const netClass = Number(r.net) >= 0 ? "pos" : "neg";
+    return `<tr><td><b>${esc(r.label)}</b></td><td>${esc(r.trades)}</td><td class="${netClass}">${Number(r.net).toFixed(2)}</td><td>${pf}</td><td>${Number(r.sharpe).toFixed(3)}</td><td>${Number(r.maxdd).toFixed(2)}%</td><td>${costs}</td></tr>`;
+  }).join("");
+  const valid = results.filter(r => !r.error && Number(r.trades) > 0);
+  const bestNet = valid.slice().sort((a, b) => Number(b.net) - Number(a.net))[0];
+  const bestPf = valid.slice().sort((a, b) => (Number(b.pf) || 0) - (Number(a.pf) || 0))[0];
+  let summary = "";
+  if (bestNet) summary += `<p class="muted">بهترین سود خالص: <b class="pos">${esc(bestNet.label)}</b> (${Number(bestNet.net).toFixed(2)})</p>`;
+  if (bestPf && bestPf !== bestNet) summary += `<p class="muted">بهترین Profit Factor: <b class="pos">${esc(bestPf.label)}</b> (${Number(bestPf.pf).toFixed(2)})</p>`;
+  $("btResult").innerHTML = `<h3>مقایسه استراتژی‌ها (${esc($("btInstrument").value)} / ${esc($("btTimeframe").value)})</h3><table><thead><tr><th>استراتژی</th><th>معاملات</th><th>سود خالص</th><th>PF</th><th>Sharpe</th><th>MaxDD</th><th>هزینه</th></tr></thead><tbody>${rows}</tbody></table>${summary}`;
+}
+
 // ==================== Telegram ====================
 async function loadTelegramSettings() {
   try {
