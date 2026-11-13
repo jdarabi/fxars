@@ -51,6 +51,7 @@ class BacktestConfig:
     #   "scenario" = منطق دقیقاً هم‌خوان با ScenarioBuilder/TriggerEvaluator
     #   "baseline" = منطق ساده قبلی (stop از کف/سقف ۲۰ کندل + ورود در open)
     mode: str = "scenario"
+    strategy: str | None = None  # FIX-BACKTEST-STRATEGY
     # P3-4-ext2: optional regime filter; empty tuple = allow all
     allowed_regimes: tuple[str, ...] = ()
 
@@ -202,6 +203,7 @@ class BacktestEngine:
             self._trigger_evaluator = TriggerEvaluator(analysis)
         # FIX-06-FALLBACK-TRANSPARENT: شمارنده fallback
         self._fallback_count = 0
+        self._last_signal: dict | None = None
         self._fallback_errors: dict[str, int] = {}
 
     def _precompute(self, candles: Sequence[Candle]) -> None:
@@ -329,7 +331,7 @@ class BacktestEngine:
 
             # --- decide on new signals
             if position is None and pending is None and index + 1 < end_index:
-                decision = self._decide(timeline, candle, regime_labels)
+                decision = self._decide(timeline, candle, regime_labels, candles_visible=candles[:index + 1])
                 stats["decisions"] += 1
                 if decision is None:
                     # could be no evidence or regime-filtered; check if regime was the cause
@@ -344,7 +346,9 @@ class BacktestEngine:
                 elif decision.strength < self.config.min_signal_strength:
                     stats["skipped"] += 1
                 else:
-                    if self.config.mode == "scenario":
+                    if self.config.strategy:
+                        pending = self._plan(decision, candles, index)
+                    elif self.config.mode == "scenario":
                         pending = self._plan_from_scenario(decision, candles, index, timeline)
                     else:
                         pending = self._plan(decision, candles, index)
@@ -376,19 +380,167 @@ class BacktestEngine:
         timeline: EvidenceTimeline,
         candle: Candle,
         regime_labels: dict[datetime, str] | None = None,
+        candles_visible: list[Candle] | None = None,
     ) -> Decision | None:
-        # P3-4-ext2: skip if the current regime is not in the allow-list
         if regime_labels is not None:
             regime = regime_labels.get(candle.open_time)
             if regime is None or regime not in self.config.allowed_regimes:
                 return None
+        if self.config.strategy:
+            return self._decide_manual(candle, candles_visible or [])
         evidences = timeline.at(candle.available_at)
         if not evidences:
             return None
         return aggregate_evidence(evidences, self.analysis, as_of=candle.available_at, timeframe=self.timeframe)
 
+    def _decide_manual(
+        self,
+        candle: Candle,
+        candles_visible: list[Candle],
+    ) -> Decision | None:
+        """FIX-BACKTEST-STRATEGY: استراتژی دستی روی همان کندل (نه آخرین).
+
+        مستقیم `entry_fn(i)` را صدا می‌زند (مثل `_simulate_simple`).
+        """
+        from fxars.live.strategy_selector import (
+            _ema_fullbody_entry_fn,
+            _f,
+            _head_shoulders_entry_fn,
+            _range,
+        )
+
+        if len(candles_visible) < 50:
+            return None
+        i = len(candles_visible) - 1
+        name = self.config.strategy
+
+        try:
+            if name == "SMC/Structure":
+                from fxars.analysis.structure import find_swings
+                swings = find_swings(candles_visible, 3)
+                recent = [s for s in swings if s.confirmed_index <= i]
+                if len(recent) < 2:
+                    return None
+                highs = [s for s in recent if s.kind == "HIGH"]
+                lows = [s for s in recent if s.kind == "LOW"]
+                if not highs or not lows:
+                    return None
+                last_high = _f(highs[-1].price)
+                last_low = _f(lows[-1].price)
+                close = _f(candles_visible[i].close)
+                atr = _range(candles_visible[i])
+                pip = _f(self.instrument.pip_size)
+                if close > last_high and (close - last_high) < atr * 2:
+                    stop = last_low - pip * 5
+                    return self._make_decision("LONG", close, stop, close + (close - stop) * 2)
+                if close < last_low and (last_low - close) < atr * 2:
+                    stop = last_high + pip * 5
+                    return self._make_decision("SHORT", close, stop, close - (stop - close) * 2)
+                return None
+
+            elif name == "Trend/EMA":
+                from fxars.analysis import indicators as ind
+                closes = [_f(c.close) for c in candles_visible]
+                ema_fast = ind.ema(closes, 20)
+                ema_slow = ind.ema(closes, 50)
+                if i < 50 or ema_fast[i] is None or ema_slow[i] is None:
+                    return None
+                f, s = ema_fast[i], ema_slow[i]
+                pf, ps = ema_fast[i - 1], ema_slow[i - 1]
+                if pf is None or ps is None:
+                    return None
+                atr = _range(candles_visible[i])
+                if pf <= ps and f > s:
+                    entry = _f(candles_visible[i].close)
+                    return self._make_decision("LONG", entry, entry - atr * 1.5, entry + atr * 3)
+                if pf >= ps and f < s:
+                    entry = _f(candles_visible[i].close)
+                    return self._make_decision("SHORT", entry, entry + atr * 1.5, entry - atr * 3)
+                return None
+
+            elif name == "MeanRev/RSI":
+                from fxars.analysis import indicators as ind
+                closes = [_f(c.close) for c in candles_visible]
+                rsi = ind.rsi(closes, 14)
+                if i < 20 or rsi[i] is None:
+                    return None
+                r = rsi[i]
+                atr = _range(candles_visible[i])
+                if r < 30:
+                    entry = _f(candles_visible[i].close)
+                    return self._make_decision("LONG", entry, entry - atr * 1.5, entry + atr * 2)
+                if r > 70:
+                    entry = _f(candles_visible[i].close)
+                    return self._make_decision("SHORT", entry, entry + atr * 1.5, entry - atr * 2)
+                return None
+
+            elif name == "Breakout/Donchian":
+                if i < 20:
+                    return None
+                window = candles_visible[i - 20:i]
+                prior_high = max(_f(c.high) for c in window)
+                prior_low = min(_f(c.low) for c in window)
+                close = _f(candles_visible[i].close)
+                pip = _f(self.instrument.pip_size)
+                if close > prior_high:
+                    stop = prior_low - pip * 5
+                    return self._make_decision("LONG", close, stop, close + (close - stop) * 2)
+                if close < prior_low:
+                    stop = prior_high + pip * 5
+                    return self._make_decision("SHORT", close, stop, close - (stop - close) * 2)
+                return None
+
+            elif name == "EMA20/FullBody":
+                entry_fn = _ema_fullbody_entry_fn(candles_visible, self.instrument)
+                sig = entry_fn(i, candles_visible)
+                if sig is None:
+                    return None
+                return self._make_decision(*sig)
+
+            elif name == "H&S/Reversal":
+                entry_fn = _head_shoulders_entry_fn(candles_visible, self.instrument)
+                sig = entry_fn(i, candles_visible)
+                if sig is None:
+                    return None
+                return self._make_decision(*sig)
+
+            else:
+                return None
+        except Exception as exc:
+            self._fallback_count += 1
+            err_name = type(exc).__name__
+            self._fallback_errors[err_name] = self._fallback_errors.get(err_name, 0) + 1
+            return None
+
+    def _make_decision(self, action: str, entry, stop, target) -> Decision | None:
+        if entry is None or stop is None or target is None:
+            return None
+        self._last_signal = {"action": action, "entry": entry, "stop": stop, "target": target}
+        return Decision(
+            action=DecisionAction.LONG if action == "LONG" else DecisionAction.SHORT,
+            direction=Direction.LONG if action == "LONG" else Direction.SHORT,
+            score=0.5, confidence_raw=0.5, family_scores={}, conflicts=(),
+            coverage=0.5, stability=1.0,
+            reasons=(f"strategy:{self.config.strategy}",),
+            evidence_ids=(), strength=0.5,
+        )
+
     def _plan(self, decision: Decision, candles: Sequence[Candle], index: int) -> dict[str, Any]:
-        # Baseline: stop از کف/سقف ۲۰ کندل + بافر
+        # FIX-BACKTEST-STRATEGY: اگر strategy، از _last_signal
+        if self.config.strategy is not None and self._last_signal is not None:
+            sig = self._last_signal
+            stop = Decimal(str(sig["stop"]))
+            target = Decimal(str(sig["target"]))
+            return {
+                "direction": decision.direction,
+                "created_index": index,
+                "stop": stop.quantize(self._quant),
+                "entry_trigger": Decimal(str(sig["entry"])).quantize(self._quant),
+                "targets": [{"type": "rr_multiple", "value": 2.0, "price": format(target.quantize(self._quant), "f")}],
+                "expiry_at": None,
+                "decision_strength": decision.strength,
+                "mode": "strategy",
+            }
         window = 20
         start = max(0, index - window + 1)
         if decision.direction is Direction.LONG:
@@ -532,7 +684,23 @@ class BacktestEngine:
             )
         )
         if not sizing.valid or sizing.volume <= ZERO:
-            return None
+            # FIX-BACKTEST-STRATEGY: برای strategy، min_lot استفاده کن (equity کوچک)
+            if self.config.strategy is not None and sizing.reason == "BELOW_MIN_LOT":
+                from fxars.risk.sizing import SizingResult
+                sizing = SizingResult(
+                    valid=True, reason="OK_MIN_LOT",
+                    risk_amount=sizing.risk_amount,
+                    stop_distance=sizing.stop_distance,
+                    stop_pips=sizing.stop_pips,
+                    pip_value_per_lot=sizing.pip_value_per_lot,
+                    loss_per_lot=sizing.loss_per_lot,
+                    raw_volume=sizing.raw_volume,
+                    volume=self.instrument.min_lot,
+                    estimated_loss_at_stop=sizing.estimated_loss_at_stop,
+                    rounding_loss=sizing.rounding_loss,
+                )
+            else:
+                return None
         sign = 1 if direction is Direction.LONG else -1
         tp1 = (entry + distance * self.config.target_r_multiples[0] * sign).quantize(self._quant)
         tp2 = (entry + distance * self.config.target_r_multiples[-1] * sign).quantize(self._quant)

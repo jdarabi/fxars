@@ -12,6 +12,7 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
         Permission.SCENARIO_READ,
         Permission.SCENARIO_TRANSITION,
         Permission.RISK_EVALUATE,
+        Permission.BACKTEST_RUN,  # FIX: analyst can run backtest
         Permission.REPORT_READ,
     }),
     Role.RESEARCHER: frozenset({
@@ -25,6 +26,7 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
         Permission.DATA_READ,
         Permission.SCENARIO_READ,
         Permission.RISK_EVALUATE,
+        Permission.BACKTEST_RUN,  # FIX: analyst can run backtest
         Permission.RISK_POLICY_WRITE,
         Permission.EXECUTION_APPROVE,
         Permission.KILLSWITCH_TOGGLE,
@@ -35,6 +37,7 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
         Permission.DATA_READ,
         Permission.SCENARIO_READ,
         Permission.RISK_EVALUATE,
+        Permission.BACKTEST_RUN,  # FIX: analyst can run backtest
         Permission.EXECUTION_ORDER,
         Permission.KILLSWITCH_TOGGLE,
     }),

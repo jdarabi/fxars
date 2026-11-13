@@ -434,7 +434,22 @@ td.num,th.num{font-variant-numeric:tabular-nums;direction:ltr;text-align:left}
         <h2>📊 بک‌تست</h2>
         <div class="row">
           <div><label>نماد</label><select id="btInstrument"></select></div>
+          <div><label>تایم‌فریم</label><select id="btTimeframe">
+            <option>M5</option>
+            <option>M15</option>
+            <option>M30</option>
+            <option selected>H1</option>
+            <option>H4</option>
+            <option>D1</option>
+          </select></div>
+          <div><label>بازه</label><select id="btSegment">
+            <option>ALL</option>
+            <option>TRAIN</option>
+            <option>VALIDATION</option>
+            <option>LOCKED_TEST</option>
+          </select></div>
           <button onclick="runBacktest()">اجرا</button>
+          <button class="ghost" onclick="runBacktestMultiTf()">مقایسه همه TFها</button>
         </div>
         <div id="btResult" style="margin-top:12px" class="muted">—</div>
       </div>
@@ -2407,7 +2422,7 @@ async function runBacktest() {
     $("btResult").innerHTML = "<span class='muted'>اجرا...</span>";
     const data = await api("/api/v1/backtests", {
       method: "POST",
-      body: JSON.stringify({ instrument_id: $("btInstrument").value, timeframe: "H1", segment: "ALL" }),
+      body: JSON.stringify({ instrument_id: $("btInstrument").value, timeframe: $("btTimeframe").value, segment: $("btSegment").value }),
     });
     $("btResult").innerHTML = `<div class="kv">
       <b>معاملات</b><span>${esc(data.run.metrics.trade_count)}</span>
@@ -2418,6 +2433,72 @@ async function runBacktest() {
   }
 }
 
+
+// ==================== Multi-TF Backtest ====================
+
+async function runBacktestMultiTf() {
+  const instrument = $("btInstrument").value;
+  const segment = $("btSegment").value;
+  const timeframes = ["M5", "M15", "H1", "H4", "D1"];
+  const results = [];
+  $("btResult").innerHTML = "<span class='muted'>در حال اجرا برای ۵ تایم‌فریم (چند ثانیه)...</span>";
+  for (const tf of timeframes) {
+    try {
+      const data = await api("/api/v1/backtests", {
+        method: "POST",
+        body: JSON.stringify({ instrument_id: instrument, timeframe: tf, segment: segment }),
+      });
+      const m = data.run.metrics;
+      results.push({
+        tf: tf,
+        trades: m.trade_count,
+        net: m.net_profit,
+        pf: m.profit_factor,
+        sharpe: m.sharpe,
+        maxdd: m.max_drawdown_pct,
+        costs: m.costs ? m.costs.total : null,
+      });
+    } catch (e) {
+      results.push({ tf: tf, error: e.message });
+    }
+  }
+  renderMultiTfTable(results);
+}
+
+function renderMultiTfTable(results) {
+  const rows = results.map(r => {
+    if (r.error) {
+      return `<tr><td>${esc(r.tf)}</td><td colspan="6" class="neg">❌ ${esc(r.error)}</td></tr>`;
+    }
+    const pf = r.pf == null ? "—" : Number(r.pf).toFixed(2);
+    const costs = r.costs == null ? "—" : Number(r.costs).toFixed(2);
+    const netClass = Number(r.net) >= 0 ? "pos" : "neg";
+    return `<tr>
+      <td><b>${esc(r.tf)}</b></td>
+      <td>${esc(r.trades)}</td>
+      <td class="${netClass}">${Number(r.net).toFixed(2)}</td>
+      <td>${pf}</td>
+      <td>${Number(r.sharpe).toFixed(3)}</td>
+      <td>${Number(r.maxdd).toFixed(2)}%</td>
+      <td>${costs}</td>
+    </tr>`;
+  }).join("");
+  const best = results
+    .filter(r => !r.error && Number(r.trades) > 0)
+    .sort((a, b) => Number(b.net) - Number(a.net))[0];
+  const summary = best
+    ? `<p class="muted">بهترین TF: <b class="pos">${esc(best.tf)}</b> با سود خالص ${Number(best.net).toFixed(2)}</p>`
+    : "";
+  $("btResult").innerHTML = `
+    <h3>مقایسه تایم‌فریم‌ها</h3>
+    <table>
+      <thead><tr>
+        <th>TF</th><th>معاملات</th><th>سود خالص</th><th>PF</th><th>Sharpe</th><th>MaxDD</th><th>هزینه</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${summary}`;
+}
 // ==================== Telegram ====================
 async function loadTelegramSettings() {
   try {
