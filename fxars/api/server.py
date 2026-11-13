@@ -931,8 +931,12 @@ class ApiApp:
                 details={"allowed": [s.value for s in BacktestSegment]},
             ) from None
         as_of = parse_ts(body["as_of"]) if body.get("as_of") else None
+        overrides = dict(body.get("overrides") or {})
+        strategy = body.get("strategy")
+        if strategy is not None:
+            overrides["strategy"] = strategy
         result = self.platform.research.run(
-            instrument_id, timeframe, config_overrides=body.get("overrides") or {},
+            instrument_id, timeframe, config_overrides=overrides,
             segment=segment, as_of=as_of, actor=user.username,
         )
         return self._json(200, {
